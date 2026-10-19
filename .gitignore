@@ -8,3 +8,4 @@ captures/
 .kotlin/
 *.jks
 *.keystore
+.claude/

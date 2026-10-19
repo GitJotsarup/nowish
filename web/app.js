@@ -20,10 +20,16 @@
   const saveSettings = () => LS.set("settings", settings);
 
   let data = LS.get("data", { tasks: [], lists: [] });
+  const normalize = () => {
+    data.tasks ||= []; data.lists ||= []; data.notes ||= []; data.categories ||= [];
+    if (!("notesLock" in data)) data.notesLock = null;
+  };
+  normalize();
   const saveData = () => LS.set("data", data);
 
-  const ui = Object.assign({ space: "PERSONAL", list: null, showDone: false }, LS.get("ui", {}));
-  const saveUi = () => LS.set("ui", { space: ui.space, list: ui.list, showDone: ui.showDone });
+  const ui = Object.assign({ tab: "tasks", space: "PERSONAL", list: null, showDone: false, noteCat: null, noteQuery: "", showTrash: false }, LS.get("ui", {}));
+  ui.noteQuery = "";
+  const saveUi = () => LS.set("ui", { tab: ui.tab, space: ui.space, list: ui.list, showDone: ui.showDone, noteCat: ui.noteCat, showTrash: ui.showTrash });
 
   let editingId = null;
   let popover = null; // { id, x, y }
@@ -126,6 +132,16 @@
     const scrollY = window.scrollY;
     const focusedAdd = document.activeElement && document.activeElement.id === "add-title";
     const addValue = $("#add-title") ? $("#add-title").value : "";
+    const searchEl = $("#note-search");
+    const searchFocus = searchEl && document.activeElement === searchEl ? searchEl.selectionStart : null;
+
+    if (ui.tab === "notes") {
+      app.innerHTML = `<div class="shell">${sidebarHtml()}<main class="notes-main">${notesUi.mainHtml()}</main></div>${dialogHtml()}`;
+      if (searchFocus != null) { const el = $("#note-search"); el.focus(); el.setSelectionRange(searchFocus, searchFocus); }
+      notesUi.afterRender();
+      window.scrollTo(0, scrollY);
+      return;
+    }
 
     let body;
     if (list) body = columnHtml(null, list.id, false);
@@ -176,13 +192,19 @@
         item("new-list", `data-space="${s}"`, "＋", "New list", false, 0);
     }).join("");
     const st = syncStatus();
-    return `
-      <aside class="sidebar" id="sidebar">
-        <div class="brand"><img src="icon.svg" alt="">Nowish</div>
+    const tabs = `<div class="tabs">
+        <button class="tab ${ui.tab === "tasks" ? "on" : ""}" data-act="tab" data-v="tasks">✅ Reminders</button>
+        <button class="tab ${ui.tab === "notes" ? "on" : ""}" data-act="tab" data-v="notes">💡 Notes</button></div>`;
+    const nav = ui.tab === "notes" ? notesUi.sidebarHtml(item) : `
         ${item("space", 'data-space="WORK"', "💼", "Work", !ui.list && ui.space === "WORK", counts("WORK"))}
         ${item("space", 'data-space="PERSONAL"', "🏠", "Personal", !ui.list && ui.space === "PERSONAL", counts("PERSONAL"))}
         ${item("space", 'data-space="BOTH"', "🌗", "Both, side by side", !ui.list && ui.space === "BOTH", 0)}
-        ${listsHtml}
+        ${listsHtml}`;
+    return `
+      <aside class="sidebar" id="sidebar">
+        <div class="brand"><img src="icon.svg" alt="">Nowish</div>
+        ${tabs}
+        ${nav}
         <div class="sidebar-foot">
           <div class="sync-pill"><span class="dot ${st.cls}"></span>${esc(st.text)}</div>
           ${item("settings", "", "⚙️", "Settings", false, 0)}
@@ -476,7 +498,9 @@
   }
 
   app.addEventListener("click", (e) => {
-    const target = e.target.closest("[data-act]");
+    if (ui.tab === "notes" && notesUi.handleCardClick(e)) return;
+    const target = e.target.closest("[data-act],[data-nact]");
+    if (target && target.dataset.nact !== undefined) { notesUi.handleClick(e, target); return; }
     if (!target) {
       if (popover && !e.target.closest("#popover")) { popover = null; render(); }
       return;
@@ -491,6 +515,7 @@
 
     switch (act) {
       case "menu": $("#sidebar").classList.toggle("open"); return;
+      case "tab": ui.tab = target.dataset.v; saveUi(); window.scrollTo(0, 0); break;
       case "space": ui.space = target.dataset.space; ui.list = null; addState.date = "today"; if (ui.space !== "BOTH") addState.space = ui.space; saveUi(); break;
       case "open-list": ui.list = target.dataset.id; addState.date = "later"; saveUi(); break;
       case "new-list": dialog = { list: "new", space: target.dataset.space }; break;
@@ -587,6 +612,7 @@
 
   app.addEventListener("input", (e) => {
     if (e.target.id === "add-title") $("#add-send").disabled = !e.target.value.trim();
+    if (e.target.id === "note-search") { ui.noteQuery = e.target.value; render(); }
   });
 
   app.addEventListener("change", (e) => {
@@ -605,6 +631,7 @@
   });
 
   app.addEventListener("keydown", (e) => {
+    notesUi.keydown(e);
     if (e.target.id === "add-title" && e.key === "Enter") { e.preventDefault(); submitAdd(); }
     if (e.target.classList.contains("title-input")) {
       if (e.key === "Enter") { e.preventDefault(); commitEdit(e.target); }
@@ -618,6 +645,7 @@
   });
 
   app.addEventListener("contextmenu", (e) => {
+    if (ui.tab === "notes" && notesUi.handleContextMenu(e)) return;
     const row = e.target.closest(".task:not(.done)");
     if (!row) return;
     e.preventDefault();
@@ -626,15 +654,18 @@
   });
 
   document.addEventListener("keydown", (e) => {
-    const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || "");
+    if (notesUi.isEditing()) return;
+    const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || "") || document.activeElement?.isContentEditable;
     if (e.key === "Escape") {
+      if (notesUi.closeDialog()) { render(); return; }
       if (popover || dialog || editingId) { popover = null; dialog = null; editingId = null; render(); }
       else if (typing) document.activeElement.blur();
       return;
     }
     if (!typing && (e.key === "n" || e.key === "/") && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
-      $("#add-title")?.focus();
+      if (ui.tab === "notes") { if (e.key === "n") notesUi.newNote(); else $("#note-search")?.focus(); }
+      else $("#add-title")?.focus();
     }
   });
 
@@ -645,7 +676,20 @@
   let remote = { etag: null, sha: null, data: null };
   let syncing = false, syncAgain = false, syncError = null, lastSync = LS.get("lastSync", 0), syncTimer = null;
 
-  function resetRemote() { remote = { etag: null, sha: null, data: null }; syncError = null; }
+  let checkedRepo = null;
+  function resetRemote() { remote = { etag: null, sha: null, data: null }; syncError = null; checkedRepo = null; }
+
+  /** Never sync into a public repo: the file holds all your tasks and notes. */
+  async function ensurePrivateRepo() {
+    if (checkedRepo === settings.repo) return;
+    const res = await fetch(`https://api.github.com/repos/${settings.repo}`, { headers: headers(), cache: "no-store" });
+    if (res.status === 404) throw new Error(`Can't find ${settings.repo} (or the token can't see it)`);
+    if (res.status === 401 || res.status === 403) throw new Error("Token rejected: check its repo access");
+    if (!res.ok) throw new Error(`GitHub error ${res.status}`);
+    const repo = await res.json();
+    if (!repo.private) throw new Error(`${settings.repo} is public. Use a private repo like nowish-data`);
+    checkedRepo = settings.repo;
+  }
 
   function syncStatus() {
     if (!settings.token) return { cls: "off", text: "Not syncing (this browser only)" };
@@ -696,14 +740,20 @@
     if (!res.ok) throw new Error(`GitHub error ${res.status}`);
     const json = await res.json();
     const parsed = JSON.parse(b64decode(json.content));
-    remote = { etag: res.headers.get("ETag"), sha: json.sha, data: { tasks: parsed.tasks || [], lists: parsed.lists || [] } };
+    remote = {
+      etag: res.headers.get("ETag"), sha: json.sha,
+      data: { tasks: parsed.tasks || [], lists: parsed.lists || [], notes: parsed.notes || [], categories: parsed.categories || [], notesLock: parsed.notesLock || null },
+    };
     return remote.data;
   }
 
   async function push(merged) {
     const body = {
       message: "Sync from web",
-      content: b64encode(JSON.stringify({ schema: 1, updatedAt: now(), lists: merged.lists, tasks: merged.tasks }, null, 1)),
+      content: b64encode(JSON.stringify({
+        schema: 2, updatedAt: now(), lists: merged.lists, tasks: merged.tasks,
+        categories: merged.categories, notes: merged.notes.filter((n) => !n._draft), notesLock: merged.notesLock,
+      }, null, 1)),
     };
     if (remote.sha) body.sha = remote.sha;
     const res = await fetch(api(), { method: "PUT", headers: { ...headers(), "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -743,16 +793,27 @@
     syncing = true;
     renderSyncPill();
     try {
+      await ensurePrivateRepo();
       for (let attempt = 0; attempt < 3; attempt++) {
         const rem = await fetchRemote();
         const cutoff = now() - TOMBSTONE_TTL;
         const lists = mergeRecords(data.lists, rem ? rem.lists : [], cutoff);
         const tasks = mergeRecords(data.tasks, rem ? rem.tasks : [], cutoff);
-        const changed = lists.localChanged || tasks.localChanged;
-        data = { lists: lists.records, tasks: tasks.records.sort((a, b) => a.createdAt - b.createdAt) };
+        const drafts = data.notes.filter((n) => n._draft);
+        const notesM = mergeRecords(data.notes.filter((n) => !n._draft), rem ? rem.notes || [] : [], cutoff);
+        const catsM = mergeRecords(data.categories, rem ? rem.categories || [] : [], cutoff);
+        const rl = rem ? rem.notesLock : null, ll = data.notesLock;
+        let lockOut = ll, lockChanged = false, lockPush = false;
+        if (rl && (!ll || rl.updatedAt > ll.updatedAt)) { lockOut = rl; lockChanged = true; }
+        else if (ll && (!rl || ll.updatedAt > rl.updatedAt)) lockPush = true;
+        const changed = lists.localChanged || tasks.localChanged || notesM.localChanged || catsM.localChanged || lockChanged;
+        data = {
+          lists: lists.records, tasks: tasks.records.sort((a, b) => a.createdAt - b.createdAt),
+          notes: [...notesM.records, ...drafts], categories: catsM.records, notesLock: lockOut,
+        };
         saveData();
-        if (changed && !editingId) render();
-        if (!rem || lists.needPush || tasks.needPush) {
+        if (changed && !editingId) { render(); notesUi.refreshEditor(); }
+        if (!rem || lists.needPush || tasks.needPush || notesM.needPush || catsM.needPush || lockPush) {
           if (await push(data)) break;
           remote.etag = null; // conflict: refetch and merge again
           continue;
@@ -792,6 +853,15 @@
     }
     LS.set("notified", [...notified].slice(-300));
   }
+
+  // ---------- notes ----------
+  const notesUi = window.NowishNotes({
+    esc, uuid, now, toast, $, celebrate, settings, ui, saveUi, saveData, render,
+    getData: () => data,
+    scheduleSync: (d) => scheduleSync(d),
+    repoApi: () => `https://api.github.com/repos/${settings.repo}`,
+    headers: () => headers(),
+  });
 
   // ---------- start ----------
   addState.space = ui.space === "BOTH" ? "WORK" : ui.space;
