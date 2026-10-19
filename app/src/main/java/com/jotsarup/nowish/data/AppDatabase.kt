@@ -87,15 +87,84 @@ private val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
-@Database(entities = [Task::class, TaskList::class], version = 2, exportSchema = false)
+@Dao
+interface NoteDao {
+    @Query("SELECT * FROM notes WHERE deleted = 0 ORDER BY updatedAt DESC")
+    fun notes(): Flow<List<Note>>
+
+    @Query("SELECT * FROM categories WHERE deleted = 0 ORDER BY createdAt")
+    fun categories(): Flow<List<Category>>
+
+    @Query("SELECT * FROM notes WHERE id = :id")
+    suspend fun note(id: Long): Note?
+
+    @Query("SELECT * FROM notes")
+    suspend fun allNotesForSync(): List<Note>
+
+    @Query("SELECT * FROM notes WHERE categoryUid = :uid AND deleted = 0")
+    suspend fun notesInCategory(uid: String): List<Note>
+
+    @Query("SELECT * FROM categories")
+    suspend fun allCategoriesForSync(): List<Category>
+
+    @Query("SELECT * FROM notes WHERE deleted = 0 AND trashedAt IS NOT NULL AND trashedAt < :before")
+    suspend fun expiredTrash(before: Long): List<Note>
+
+    @Query("DELETE FROM notes WHERE deleted = 1 AND updatedAt < :before")
+    suspend fun purgeNotes(before: Long)
+
+    @Query("DELETE FROM categories WHERE deleted = 1 AND updatedAt < :before")
+    suspend fun purgeCategories(before: Long)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(note: Note): Long
+
+    @Update
+    suspend fun update(note: Note)
+
+    @Update
+    suspend fun updateAll(notes: List<Note>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCategory(category: Category): Long
+
+    @Update
+    suspend fun updateCategory(category: Category)
+}
+
+private val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `notes` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`uid` TEXT NOT NULL, `title` TEXT NOT NULL, `content` TEXT NOT NULL, `checklist` TEXT, " +
+                "`color` TEXT NOT NULL, `theme` TEXT, `categoryUid` TEXT, `pinned` INTEGER NOT NULL, " +
+                "`locked` INTEGER NOT NULL, `images` TEXT NOT NULL, `trashedAt` INTEGER, " +
+                "`createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL)"
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_notes_uid` ON `notes` (`uid`)")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `categories` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`uid` TEXT NOT NULL, `name` TEXT NOT NULL, `emoji` TEXT NOT NULL, `color` TEXT NOT NULL, " +
+                "`createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL)"
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_categories_uid` ON `categories` (`uid`)")
+    }
+}
+
+@Database(
+    entities = [Task::class, TaskList::class, Note::class, Category::class],
+    version = 3,
+    exportSchema = false,
+)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): TaskDao
+    abstract fun noteDao(): NoteDao
 
     companion object {
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "nowish.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
     }
 }

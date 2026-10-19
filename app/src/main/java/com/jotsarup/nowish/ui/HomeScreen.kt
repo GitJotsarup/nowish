@@ -101,7 +101,7 @@ private sealed interface ListDialogState {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NowishRoot(vm: NowishViewModel) {
+fun NowishRoot(vm: NowishViewModel, bottomBar: @Composable () -> Unit = {}) {
     val state by vm.state.collectAsStateWithLifecycle()
     val soundOn by vm.soundOn.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -180,6 +180,7 @@ fun NowishRoot(vm: NowishViewModel) {
     ) {
         Box(Modifier.fillMaxSize()) {
             Scaffold(
+                bottomBar = bottomBar,
                 snackbarHost = { SnackbarHost(snackbar) },
                 floatingActionButton = {
                     FloatingActionButton(

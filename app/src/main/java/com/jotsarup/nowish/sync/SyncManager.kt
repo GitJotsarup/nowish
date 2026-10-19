@@ -2,6 +2,9 @@ package com.jotsarup.nowish.sync
 
 import android.util.Base64
 import com.jotsarup.nowish.NowishApp
+import com.jotsarup.nowish.data.Category
+import com.jotsarup.nowish.data.ImageStore
+import com.jotsarup.nowish.data.Note
 import com.jotsarup.nowish.data.Space
 import com.jotsarup.nowish.data.Task
 import com.jotsarup.nowish.data.TaskList
@@ -73,6 +76,7 @@ class SyncManager(private val app: NowishApp) {
         remoteEtag = null
         remoteSha = null
         remoteCache = null
+        checkedRepo = null
         _state.value = SyncState(prefs.syncConfigured, lastSyncAt = prefs.lastSyncAt)
         requestSync(0)
     }
@@ -106,8 +110,27 @@ class SyncManager(private val app: NowishApp) {
         }
     }
 
+    private var checkedRepo: String? = null
+
+    /** Refuses to sync into a public repo, since the file holds all your tasks and notes. */
+    private fun ensurePrivateRepo() {
+        val repo = prefs.syncRepo
+        if (checkedRepo == repo) return
+        val res = http("GET", "https://api.github.com/repos/$repo")
+        when (res.code) {
+            200 -> if (!JSONObject(res.body).optBoolean("private", false)) {
+                throw SyncException("$repo is public. Use a private repo like nowish-data")
+            }
+            404 -> throw SyncException("Can't find repo $repo (or the token can't see it)")
+            401, 403 -> throw SyncException("Token rejected. Check it has access to $repo")
+            else -> throw SyncException("GitHub error ${res.code}")
+        }
+        checkedRepo = repo
+    }
+
     /** Returns false on a write conflict (caller retries). */
     private suspend fun syncOnce(): Boolean {
+        ensurePrivateRepo()
         val remote = fetchRemote()
         val now = System.currentTimeMillis()
         val purgeBefore = now - TOMBSTONE_TTL
@@ -168,15 +191,116 @@ class SyncManager(private val app: NowishApp) {
         val remoteTaskUids = remoteTasks.mapTo(HashSet()) { it.task.uid }
         if (localTasks.keys.any { it !in remoteTaskUids }) needPush = true
 
+        // ---- note categories ----
+        val noteDao = app.database.noteDao()
+        noteDao.purgeNotes(purgeBefore)
+        noteDao.purgeCategories(purgeBefore)
+        val localCats = noteDao.allCategoriesForSync().associateBy { it.uid }
+        val remoteCats = remote?.categories.orEmpty()
+        for (r in remoteCats) {
+            val l = localCats[r.uid]
+            when {
+                l == null -> if (!r.deleted) {
+                    noteDao.insertCategory(r.copy(id = 0))
+                    localChanged = true
+                }
+                r.updatedAt > l.updatedAt -> {
+                    noteDao.updateCategory(r.copy(id = l.id))
+                    localChanged = true
+                }
+                l.updatedAt > r.updatedAt -> needPush = true
+            }
+        }
+        val remoteCatUids = remoteCats.mapTo(HashSet()) { it.uid }
+        if (localCats.keys.any { it !in remoteCatUids }) needPush = true
+
+        // ---- notes ----
+        val localNotes = noteDao.allNotesForSync().associateBy { it.uid }
+        val remoteNotes = remote?.notes.orEmpty()
+        for (r in remoteNotes) {
+            val l = localNotes[r.uid]
+            when {
+                l == null -> if (!r.deleted) {
+                    noteDao.insert(r.copy(id = 0))
+                    localChanged = true
+                }
+                r.updatedAt > l.updatedAt -> {
+                    noteDao.update(r.copy(id = l.id))
+                    localChanged = true
+                }
+                l.updatedAt > r.updatedAt -> needPush = true
+            }
+        }
+        val remoteNoteUids = remoteNotes.mapTo(HashSet()) { it.uid }
+        if (localNotes.keys.any { it !in remoteNoteUids }) needPush = true
+
+        // ---- notes PIN ----
+        val rl = remote?.lock
+        if (rl != null && rl.updatedAt > prefs.lockUpdatedAt) {
+            prefs.lockSalt = rl.salt
+            prefs.lockHash = rl.hash
+            prefs.lockUpdatedAt = rl.updatedAt
+            localChanged = true
+        } else if (prefs.lockConfigured && prefs.lockUpdatedAt > (rl?.updatedAt ?: 0L)) {
+            needPush = true
+        }
+
         if (needPush) {
+            val lock = if (prefs.lockConfigured) {
+                RemoteLock(prefs.lockSalt!!, prefs.lockHash!!, prefs.lockUpdatedAt)
+            } else null
             val data = RemoteData(
                 tasks = dao.allTasksForSync().map { RemoteTask(it, it.listId?.let(listUidById::get)) },
                 lists = dao.allListsForSync(),
+                notes = noteDao.allNotesForSync(),
+                categories = noteDao.allCategoriesForSync(),
+                lock = lock,
             )
             if (!push(data)) return false
         }
+        syncImages(noteDao.allNotesForSync())
         if (localChanged) app.onRemoteChange()
         return true
+    }
+
+    /** Uploads new note images and downloads ones added on the laptop. Failures retry next sync. */
+    private fun syncImages(notes: List<Note>) {
+        val wanted = notes.filter { !it.deleted }.flatMap { it.imageList }.toSet()
+        val uploaded = prefs.uploadedImages.toMutableSet()
+        for (uid in wanted) {
+            val file = ImageStore.file(app, uid)
+            runCatching {
+                if (!file.exists()) {
+                    val bytes = httpBytes("https://api.github.com/repos/${prefs.syncRepo}/contents/images/$uid.jpg")
+                    if (bytes != null) {
+                        file.writeBytes(bytes)
+                        uploaded += uid
+                    }
+                } else if (uid !in uploaded) {
+                    val body = JSONObject()
+                        .put("message", "Add image")
+                        .put("content", Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))
+                    val url = "https://api.github.com/repos/${prefs.syncRepo}/contents/images/$uid.jpg"
+                    val res = http("PUT", url, body = body.toString())
+                    if (res.code in 200..299 || res.code == 422) uploaded += uid
+                }
+            }
+        }
+        prefs.uploadedImages = uploaded
+    }
+
+    private fun httpBytes(url: String): ByteArray? {
+        val c = URL(url).openConnection() as HttpURLConnection
+        try {
+            c.connectTimeout = 15_000
+            c.readTimeout = 30_000
+            c.setRequestProperty("Authorization", "Bearer ${prefs.syncToken}")
+            c.setRequestProperty("Accept", "application/vnd.github.raw+json")
+            c.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+            return if (c.responseCode == 200) c.inputStream.use { it.readBytes() } else null
+        } finally {
+            c.disconnect()
+        }
     }
 
     // ---------- GitHub API ----------
@@ -256,7 +380,14 @@ class SyncManager(private val app: NowishApp) {
     // ---------- JSON (shared format with the web app) ----------
 
     private class RemoteTask(val task: Task, val listUid: String?)
-    private class RemoteData(val tasks: List<RemoteTask>, val lists: List<TaskList>)
+    private class RemoteLock(val salt: String, val hash: String, val updatedAt: Long)
+    private class RemoteData(
+        val tasks: List<RemoteTask>,
+        val lists: List<TaskList>,
+        val notes: List<Note>,
+        val categories: List<Category>,
+        val lock: RemoteLock?,
+    )
 
     private fun parse(text: String): RemoteData {
         val root = JSONObject(text)
@@ -288,7 +419,39 @@ class SyncManager(private val app: NowishApp) {
                 o.optStringOrNull("list"),
             )
         }
-        return RemoteData(tasks, lists)
+        val categories = root.optJSONArray("categories").objects().map { o ->
+            Category(
+                uid = o.getString("id"),
+                name = o.optString("name"),
+                emoji = o.optString("emoji", "📁"),
+                color = o.optString("color", "default"),
+                createdAt = o.optLong("createdAt"),
+                updatedAt = o.optLong("updatedAt"),
+                deleted = o.optBoolean("deleted"),
+            )
+        }
+        val notes = root.optJSONArray("notes").objects().map { o ->
+            Note(
+                uid = o.getString("id"),
+                title = o.optString("title"),
+                content = o.optString("content"),
+                checklist = o.optJSONArray("checklist")?.toString(),
+                color = o.optString("color", "default"),
+                theme = o.optStringOrNull("theme"),
+                categoryUid = o.optStringOrNull("category"),
+                pinned = o.optBoolean("pinned"),
+                locked = o.optBoolean("locked"),
+                images = o.optJSONArray("images")?.toString() ?: "[]",
+                trashedAt = if (o.isNull("trashedAt")) null else o.optLong("trashedAt"),
+                createdAt = o.optLong("createdAt"),
+                updatedAt = o.optLong("updatedAt"),
+                deleted = o.optBoolean("deleted"),
+            )
+        }
+        val lock = root.optJSONObject("notesLock")?.let {
+            RemoteLock(it.optString("salt"), it.optString("hash"), it.optLong("updatedAt"))
+        }?.takeIf { it.salt.isNotEmpty() && it.hash.isNotEmpty() }
+        return RemoteData(tasks, lists, notes, categories, lock)
     }
 
     private fun serialize(data: RemoteData): String {
@@ -323,8 +486,47 @@ class SyncManager(private val app: NowishApp) {
                     .put("deleted", t.deleted)
             )
         }
+        val categories = JSONArray()
+        data.categories.sortedBy { it.createdAt }.forEach { c ->
+            categories.put(
+                JSONObject()
+                    .put("id", c.uid)
+                    .put("name", c.name)
+                    .put("emoji", c.emoji)
+                    .put("color", c.color)
+                    .put("createdAt", c.createdAt)
+                    .put("updatedAt", c.updatedAt)
+                    .put("deleted", c.deleted)
+            )
+        }
+        val notes = JSONArray()
+        data.notes.sortedBy { it.createdAt }.forEach { n ->
+            notes.put(
+                JSONObject()
+                    .put("id", n.uid)
+                    .put("title", n.title)
+                    .put("content", n.content)
+                    .put("checklist", n.checklist?.let { runCatching { JSONArray(it) }.getOrNull() } ?: JSONObject.NULL)
+                    .put("color", n.color)
+                    .put("theme", n.theme ?: JSONObject.NULL)
+                    .put("category", n.categoryUid ?: JSONObject.NULL)
+                    .put("pinned", n.pinned)
+                    .put("locked", n.locked)
+                    .put("images", runCatching { JSONArray(n.images) }.getOrDefault(JSONArray()))
+                    .put("trashedAt", n.trashedAt ?: JSONObject.NULL)
+                    .put("createdAt", n.createdAt)
+                    .put("updatedAt", n.updatedAt)
+                    .put("deleted", n.deleted)
+            )
+        }
+        val lock: Any = data.lock?.let {
+            JSONObject().put("salt", it.salt).put("hash", it.hash).put("iterations", 120_000).put("updatedAt", it.updatedAt)
+        } ?: JSONObject.NULL
         return JSONObject()
-            .put("schema", 1)
+            .put("schema", 2)
+            .put("categories", categories)
+            .put("notes", notes)
+            .put("notesLock", lock)
             .put("updatedAt", System.currentTimeMillis())
             .put("lists", lists)
             .put("tasks", tasks)

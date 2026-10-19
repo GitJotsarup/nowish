@@ -75,6 +75,10 @@ dependencies {
 
     implementation("androidx.glance:glance-appwidget:1.1.1")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("com.mohamedrejeb.richeditor:richeditor-compose:1.0.0-rc10")
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")

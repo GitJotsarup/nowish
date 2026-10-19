@@ -31,6 +31,30 @@ class Prefs(context: Context) {
         get() = sp.getString("last_sync_error", null)
         set(value) = sp.edit().putString("last_sync_error", value).apply()
 
+    // Notes lock (PIN hash), shared with the web app through sync.
+    var lockSalt: String?
+        get() = sp.getString("lock_salt", null)
+        set(value) = sp.edit().putString("lock_salt", value).apply()
+
+    var lockHash: String?
+        get() = sp.getString("lock_hash", null)
+        set(value) = sp.edit().putString("lock_hash", value).apply()
+
+    var lockUpdatedAt: Long
+        get() = sp.getLong("lock_updated", 0L)
+        set(value) = sp.edit().putLong("lock_updated", value).apply()
+
+    val lockConfigured: Boolean get() = !lockSalt.isNullOrEmpty() && !lockHash.isNullOrEmpty()
+
+    var biometricUnlock: Boolean
+        get() = sp.getBoolean("biometric", true)
+        set(value) = sp.edit().putBoolean("biometric", value).apply()
+
+    /** Note images already pushed to the data repo. */
+    var uploadedImages: Set<String>
+        get() = sp.getStringSet("uploaded_images", emptySet()) ?: emptySet()
+        set(value) = sp.edit().putStringSet("uploaded_images", value).apply()
+
     val syncConfigured: Boolean get() = syncToken.isNotBlank() && syncRepo.contains('/')
 
     companion object {

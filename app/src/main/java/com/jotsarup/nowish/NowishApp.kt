@@ -7,6 +7,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.jotsarup.nowish.data.AppDatabase
+import com.jotsarup.nowish.data.NotesRepository
 import com.jotsarup.nowish.data.Prefs
 import com.jotsarup.nowish.data.TaskRepository
 import com.jotsarup.nowish.reminders.Notifications
@@ -24,6 +25,7 @@ class NowishApp : Application() {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val database by lazy { AppDatabase.build(this) }
     val repository by lazy { TaskRepository(this, database.dao(), ::onLocalChange) }
+    val notes by lazy { NotesRepository(this, database.noteDao(), prefs) { sync.requestSync() } }
     val prefs by lazy { Prefs(this) }
     val sounds by lazy { SoundFx(this, prefs) }
     val sync by lazy { SyncManager(this) }
@@ -36,6 +38,7 @@ class NowishApp : Application() {
             ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).build(),
         )
+        appScope.launch { runCatching { notes.purgeExpiredTrash() } }
     }
 
     private fun onLocalChange() {
