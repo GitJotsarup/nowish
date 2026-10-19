@@ -9,3 +9,7 @@ captures/
 *.jks
 *.keystore
 .claude/
+
+# Synced data belongs in the private nowish-data repo, never here
+/nowish.json
+/images/
