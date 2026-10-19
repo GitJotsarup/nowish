@@ -51,6 +51,13 @@ class NowishViewModel(application: Application) : AndroidViewModel(application) 
     private val _soundOn = MutableStateFlow(app.prefs.soundOn)
     val soundOn: StateFlow<Boolean> = _soundOn.asStateFlow()
 
+    val syncState = app.sync.state
+    val syncRepo: String get() = app.prefs.syncRepo
+    val syncToken: String get() = app.prefs.syncToken
+
+    /** Set when the widget's + button opened the app; the UI shows the add sheet and clears it. */
+    val addRequested = MutableStateFlow(false)
+
     // Re-evaluated periodically so "Today" flips over at midnight while the app is open.
     private val today = flow {
         while (true) {
@@ -121,6 +128,12 @@ class NowishViewModel(application: Application) : AndroidViewModel(application) 
 
     fun openList(id: Long?) {
         listId.value = id
+    }
+
+    fun configureSync(repo: String, token: String) = app.sync.configure(repo, token)
+
+    fun syncNow() {
+        viewModelScope.launch { app.sync.sync() }
     }
 
     fun setSound(on: Boolean) {

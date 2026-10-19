@@ -30,6 +30,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.SyncProblem
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import com.jotsarup.nowish.sync.SyncState
 import androidx.compose.material.icons.rounded.BusinessCenter
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -111,6 +116,18 @@ fun NowishRoot(vm: NowishViewModel) {
     var listDialog by remember { mutableStateOf<ListDialogState?>(null) }
     var confirmDeleteList by remember { mutableStateOf<TaskList?>(null) }
     var showCompleted by rememberSaveable { mutableStateOf(false) }
+    val syncState by vm.syncState.collectAsStateWithLifecycle()
+    val addRequested by vm.addRequested.collectAsStateWithLifecycle()
+    var showSync by remember { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(addRequested) {
+        if (addRequested) {
+            showAdd = true
+            vm.addRequested.value = false
+        }
+    }
+    LaunchedEffect(syncState.syncing) { if (!syncState.syncing) refreshing = false }
 
     RequestNotificationPermission()
 
@@ -153,6 +170,11 @@ fun NowishRoot(vm: NowishViewModel) {
                     scope.launch { drawerState.close() }
                 },
                 onNewList = { listDialog = ListDialogState.New },
+                syncState = syncState,
+                onOpenSync = {
+                    showSync = true
+                    scope.launch { drawerState.close() }
+                },
             )
         },
     ) {
@@ -182,9 +204,23 @@ fun NowishRoot(vm: NowishViewModel) {
                     )
                 },
             ) { padding ->
-                TaskListContent(
+                PullToRefreshBox(
+                    isRefreshing = refreshing,
+                    onRefresh = {
+                        if (syncState.configured) {
+                            refreshing = true
+                            vm.syncNow()
+                        } else {
+                            showSync = true
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = padding.calculateTopPadding()),
+                ) {
+                    TaskListContent(
                         state = state,
-                        padding = padding,
+                        padding = PaddingValues(bottom = padding.calculateBottomPadding()),
                         editingId = editingId,
                         showCompleted = showCompleted,
                         onToggleCompleted = { showCompleted = !showCompleted },
@@ -198,6 +234,7 @@ fun NowishRoot(vm: NowishViewModel) {
                         onDeleteCompleted = { vm.delete(it) },
                         onClearCompleted = vm::clearCompleted,
                     )
+                }
             }
             ConfettiOverlay(confetti)
         }
@@ -236,6 +273,17 @@ fun NowishRoot(vm: NowishViewModel) {
                 listDialog = null
                 scope.launch { drawerState.close() }
             },
+        )
+    }
+
+    if (showSync) {
+        SyncDialog(
+            initialRepo = vm.syncRepo,
+            initialToken = vm.syncToken,
+            state = syncState,
+            onSave = { repo, token -> vm.configureSync(repo, token) },
+            onSyncNow = vm::syncNow,
+            onDismiss = { showSync = false },
         )
     }
 
@@ -507,6 +555,8 @@ private fun DrawerContent(
     onSound: (Boolean) -> Unit,
     onOpenList: (Long?) -> Unit,
     onNewList: () -> Unit,
+    syncState: SyncState,
+    onOpenSync: () -> Unit,
 ) {
     ModalDrawerSheet {
         Column(Modifier.padding(horizontal = 12.dp)) {
@@ -559,6 +609,32 @@ private fun DrawerContent(
             )
         }
         HorizontalDivider()
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpenSync)
+                .padding(horizontal = 28.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                when {
+                    !syncState.configured -> Icons.Rounded.CloudOff
+                    syncState.error != null -> Icons.Rounded.SyncProblem
+                    else -> Icons.Rounded.CloudDone
+                },
+                null,
+                tint = if (syncState.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text("Sync with laptop", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    syncSummary(syncState),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Row(
             Modifier
                 .fillMaxWidth()

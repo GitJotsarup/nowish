@@ -13,7 +13,7 @@ object ReminderScheduler {
 
     fun schedule(context: Context, task: Task) {
         cancel(context, task.id)
-        if (task.done) return
+        if (task.done || task.deleted) return
         val at = task.reminderAt() ?: return
         val millis = at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         if (millis <= System.currentTimeMillis()) return

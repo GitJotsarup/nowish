@@ -4,26 +4,45 @@ import android.content.Context
 import com.jotsarup.nowish.reminders.Notifications
 import com.jotsarup.nowish.reminders.ReminderScheduler
 
-class TaskRepository(private val context: Context, private val dao: TaskDao) {
+/**
+ * All writes stamp [Task.updatedAt] (so sync knows which copy is newest) and call [onChanged],
+ * which kicks off a sync and refreshes the home-screen widgets.
+ */
+class TaskRepository(
+    private val context: Context,
+    private val dao: TaskDao,
+    private val onChanged: () -> Unit,
+) {
     fun tasks(space: Space) = dao.tasks(space)
     fun lists(space: Space) = dao.lists(space)
 
     suspend fun task(id: Long) = dao.task(id)
     suspend fun list(id: Long) = dao.list(id)
+    suspend fun openTasks() = dao.openTasks()
+    suspend fun allLists() = dao.allLists()
+
+    private fun now() = System.currentTimeMillis()
 
     suspend fun add(task: Task): Task {
         val saved = task.copy(id = dao.insert(task))
         ReminderScheduler.schedule(context, saved)
+        onChanged()
         return saved
     }
 
     suspend fun save(task: Task) {
-        dao.update(task)
-        ReminderScheduler.schedule(context, task)
+        val updated = task.copy(updatedAt = now())
+        dao.update(updated)
+        ReminderScheduler.schedule(context, updated)
+        onChanged()
     }
 
     suspend fun setDone(task: Task, done: Boolean) {
-        val updated = task.copy(done = done, completedAt = if (done) System.currentTimeMillis() else null)
+        val updated = task.copy(
+            done = done,
+            completedAt = if (done) now() else null,
+            updatedAt = now(),
+        )
         dao.update(updated)
         if (done) {
             ReminderScheduler.cancel(context, task.id)
@@ -31,32 +50,46 @@ class TaskRepository(private val context: Context, private val dao: TaskDao) {
         } else {
             ReminderScheduler.schedule(context, updated)
         }
+        onChanged()
     }
 
-    /** Used by the notification "Mark done" action. Returns true if the task was still open. */
+    /** Used by the notification and widget "done" actions. Returns true if the task was still open. */
     suspend fun complete(id: Long): Boolean {
-        val task = dao.task(id)?.takeIf { !it.done } ?: return false
+        val task = dao.task(id)?.takeIf { !it.done && !it.deleted } ?: return false
         setDone(task, true)
         return true
     }
 
     suspend fun delete(task: Task) {
-        dao.delete(task)
+        dao.update(task.copy(deleted = true, updatedAt = now()))
         ReminderScheduler.cancel(context, task.id)
         Notifications.cancel(context, task.id)
+        onChanged()
     }
 
-    /** Re-inserts a deleted task with its original id (undo). */
+    /** Brings back a deleted task (undo). */
     suspend fun restore(task: Task) {
-        dao.insert(task)
-        ReminderScheduler.schedule(context, task)
+        val restored = task.copy(deleted = false, updatedAt = now())
+        dao.insert(restored)
+        ReminderScheduler.schedule(context, restored)
+        onChanged()
     }
 
-    suspend fun deleteAll(tasks: List<Task>) = dao.deleteAll(tasks)
+    suspend fun deleteAll(tasks: List<Task>) {
+        dao.updateAll(tasks.map { it.copy(deleted = true, updatedAt = now()) })
+        onChanged()
+    }
 
-    suspend fun addList(list: TaskList): Long = dao.insertList(list)
+    suspend fun addList(list: TaskList): Long {
+        val id = dao.insertList(list)
+        onChanged()
+        return id
+    }
 
-    suspend fun saveList(list: TaskList) = dao.updateList(list)
+    suspend fun saveList(list: TaskList) {
+        dao.updateList(list.copy(updatedAt = now()))
+        onChanged()
+    }
 
     suspend fun deleteList(list: TaskList) {
         val tasks = dao.tasksInList(list.id)
@@ -64,8 +97,9 @@ class TaskRepository(private val context: Context, private val dao: TaskDao) {
             ReminderScheduler.cancel(context, it.id)
             Notifications.cancel(context, it.id)
         }
-        dao.deleteAll(tasks)
-        dao.deleteList(list)
+        dao.updateAll(tasks.map { it.copy(deleted = true, updatedAt = now()) })
+        dao.updateList(list.copy(deleted = true, updatedAt = now()))
+        onChanged()
     }
 
     suspend fun rescheduleAll() {

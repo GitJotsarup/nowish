@@ -30,7 +30,7 @@ class ReminderReceiver : BroadcastReceiver() {
         runAsync {
             val repo = context.nowish.repository
             val task = repo.task(id)
-            if (task != null && !task.done) {
+            if (task != null && !task.done && !task.deleted) {
                 Notifications.show(context, task, task.listId?.let { repo.list(it) })
             }
         }

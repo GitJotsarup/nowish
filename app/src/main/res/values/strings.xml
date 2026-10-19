@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Nowish</string>
+    <string name="widget_description">Your tasks at a glance. Pick Today, Upcoming, a space or a list.</string>
 </resources>
