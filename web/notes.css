@@ -37,8 +37,6 @@
 }
 .note-card.plain { background: var(--surface); border-color: color-mix(in oklab, var(--outline) 60%, transparent); }
 .note-card:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
-.ink-light { color: #fff; }
-.ink-dark { color: #1b1b1f; }
 .nc-pad { padding: 14px 16px 14px; }
 .nc-foot { padding-top: 0; }
 .nc-title { font-weight: 700; font-size: 16.5px; line-height: 1.3; margin-bottom: 6px; padding-right: 18px; word-wrap: break-word; }
@@ -121,6 +119,22 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: .92em; backgro
 .theme-thumb.none { background: var(--container-high); font-size: 11px; color: var(--muted); }
 .theme-thumb.on { border-color: var(--primary); }
 img.missing { min-height: 60px; }
+
+/* Text color follows the note's background. Declared after the base rules (and more specific) so it wins. */
+.note-card.ink-light, .note-editor.ink-light { color: #fff; caret-color: #fff; }
+.note-card.ink-dark, .note-editor.ink-dark { color: #1b1b1f; caret-color: #1b1b1f; }
+.note-card.plain, .note-editor.plain { color: var(--text); caret-color: var(--primary); }
+.themed.ink-light .nc-pad, .themed.ink-light .ne-scroll, .themed.ink-light .ne-toolbar, .themed.ink-light .ne-bottom { text-shadow: 0 1px 3px rgb(0 0 0 / .55); }
+.themed.ink-dark .nc-pad, .themed.ink-dark .ne-scroll, .themed.ink-dark .ne-toolbar, .themed.ink-dark .ne-bottom { text-shadow: 0 1px 2px rgb(255 255 255 / .6); }
+.note-editor .ne-palette { color: var(--text); text-shadow: none; }
+.note-editor .ne-title::placeholder, .note-editor .ne-item input::placeholder { color: currentColor; opacity: .55; }
+
+.nav-row { display: flex; align-items: center; }
+.nav-row .nav-item { flex: 1; min-width: 0; }
+.nav-edit { opacity: 0; flex: none; width: 32px; height: 32px; font-size: 15px; }
+.nav-row:hover .nav-edit, .nav-edit:focus { opacity: 1; }
+.cat-tools { margin: 4px 0 0 4px; }
+@media (max-width: 860px) { .nav-edit { opacity: .7; } }
 @media (max-width: 860px) {
   .note-editor { max-height: 100vh; height: 100%; border-radius: 0; }
   .editor-scrim { padding: 0; }

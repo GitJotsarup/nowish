@@ -13,6 +13,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.imageResource
 import com.jotsarup.nowish.R
@@ -80,6 +82,13 @@ fun noteInk(color: String?, theme: String?): Color {
     return if (isSystemInDarkTheme()) Color(0xFFE8EAED) else Color(0xFF202124)
 }
 
+/** Soft shadow so text stays readable over the busier parts of a pixel theme. */
+fun noteTextShadow(theme: String?): Shadow? {
+    val t = noteTheme(theme) ?: return null
+    return if (t.lightInk) Shadow(Color.Black.copy(alpha = 0.6f), Offset(0f, 2f), 6f)
+    else Shadow(Color.White.copy(alpha = 0.7f), Offset(0f, 1f), 4f)
+}
+
 @Composable
 fun PixelImage(bitmap: ImageBitmap, modifier: Modifier = Modifier, alignment: Alignment = Alignment.BottomCenter) {
     Image(
@@ -108,7 +117,7 @@ fun NoteBackground(
             Box(
                 Modifier
                     .matchParentSize()
-                    .background(if (t.lightInk) Color.Black.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.30f))
+                    .background(if (t.lightInk) Color.Black.copy(alpha = 0.38f) else Color.White.copy(alpha = 0.50f))
             )
         }
         content()

@@ -98,6 +98,9 @@ class NotesRepository(
 object ImageStore {
     private const val MAX_SIDE = 1600
 
+    /** Bumped when images arrive from sync so the UI can show them. */
+    val version = kotlinx.coroutines.flow.MutableStateFlow(0)
+
     fun dir(context: Context) = File(context.filesDir, "note_images").apply { mkdirs() }
     fun file(context: Context, uid: String) = File(dir(context), "$uid.jpg")
 

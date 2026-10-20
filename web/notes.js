@@ -37,8 +37,8 @@ window.NowishNotes = function (ctx) {
   function look(n) {
     const t = theme(n.theme);
     if (t) {
-      const scrim = t[2] ? "rgb(0 0 0 / .22)" : "rgb(255 255 255 / .30)";
-      return { style: `background:linear-gradient(${scrim},${scrim}),url(themes/${t[0]}.png) center bottom/cover;`, cls: t[2] ? "ink-light" : "ink-dark" };
+      const scrim = t[2] ? "rgb(0 0 0 / .38)" : "rgb(255 255 255 / .5)";
+      return { style: `background:linear-gradient(${scrim},${scrim}),url(themes/${t[0]}.png) center bottom/cover;`, cls: (t[2] ? "ink-light" : "ink-dark") + " themed" };
     }
     const c = colorValue(n.color);
     if (c) return { style: `background:${c};`, cls: isDark() ? "ink-light" : "ink-dark" };
@@ -186,12 +186,15 @@ window.NowishNotes = function (ctx) {
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  function sidebarHtml(item) {
+  function sidebarHtml() {
     const ui = ctx.ui;
     const live = notes().filter((n) => !n.trashedAt);
+    const item = (act, attrs, emoji, label, active, count, edit) =>
+      `<div class="nav-row"><button class="nav-item ${active ? "active" : ""}" data-nact="${act}" ${attrs}><span class="emoji">${emoji}</span>${label}${count ? `<span class="count">${count}</span>` : ""}</button>` +
+      (edit ? `<button class="icon-btn nav-edit" data-nact="cat-edit" data-id="${edit}" title="Edit or delete category">✎</button>` : "") + `</div>`;
     return `<div class="nav-label">Notes</div>` +
-      item("note-cat", 'data-id=""', "✨", "All notes", !ui.showTrash && !ui.noteCat, live.length) +
-      cats().map((c) => item("note-cat", `data-id="${c.id}"`, esc(c.emoji), esc(c.name), !ui.showTrash && ui.noteCat === c.id, live.filter((n) => n.category === c.id).length)).join("") +
+      item("cat", 'data-id=""', "✨", "All notes", !ui.showTrash && !ui.noteCat, live.length) +
+      cats().map((c) => item("cat", `data-id="${c.id}"`, esc(c.emoji), esc(c.name), !ui.showTrash && ui.noteCat === c.id, live.filter((n) => n.category === c.id).length, c.id)).join("") +
       item("cat-new", "", "＋", "New category", false, 0) +
       item("show-trash", "", "🗑️", "Trash", ui.showTrash, notes().filter((n) => n.trashedAt).length);
   }
@@ -247,6 +250,7 @@ window.NowishNotes = function (ctx) {
           <span class="cc-label">${esc(c.name)}</span><span class="cc-count">${all.filter((n) => n.category === c.id).length || ""}</span></button>`))
       .concat([`<button class="cat-circle add" data-nact="cat-new"><span class="cc-dot">＋</span><span class="cc-label">New</span><span class="cc-count"></span></button>`]);
     const searching = (ui.noteQuery || "").trim() || ui.noteCat;
+    const selectedCat = ui.noteCat ? findCat(ui.noteCat) : null;
     return `
       <div class="notes-top">
         <button class="icon-btn menu-btn" data-act="menu">☰</button>
@@ -255,6 +259,7 @@ window.NowishNotes = function (ctx) {
         ${unlocked && lock() ? '<button class="icon-btn" data-nact="relock" title="Hide locked notes again">🔓</button>' : ""}
       </div>
       <div class="cat-row">${circles.join("")}</div>
+      ${selectedCat ? `<div class="cat-tools"><button class="chip small" data-nact="cat-edit" data-id="${selectedCat.id}">✎ Edit or delete “${esc(selectedCat.name)}”</button></div>` : ""}
       ${pinned.length ? `<div class="notes-label">PINNED</div><div class="masonry">${pinned.map(cardHtml).join("")}</div>` : ""}
       ${pinned.length && others.length ? `<div class="notes-label">OTHERS</div>` : ""}
       ${others.length ? `<div class="masonry">${others.map(cardHtml).join("")}</div>` : ""}
@@ -274,6 +279,7 @@ window.NowishNotes = function (ctx) {
       return `
         <div class="scrim" data-nact="close-ndialog"><div class="dialog" data-stop>
           <h2>${c ? "Edit category" : "New category"}</h2>
+          ${d.confirm ? `<p class="err-text">Delete “${esc(c?.name)}”? Its notes stay, they just lose the category.</p>` : ""}
           <label>Name</label>
           <input class="field" id="cat-name" value="${esc(d.name ?? c?.name ?? "")}" placeholder="Sikhi notes">
           <label>Icon</label>
@@ -281,7 +287,7 @@ window.NowishNotes = function (ctx) {
           <label>Color</label>
           <div class="swatches">${COLORS.map(([k, name]) => `<button class="swatch ${color === k ? "on" : ""}" title="${name}" style="background:${colorValue(k) || "var(--container-high)"}" data-nact="cat-color" data-v="${k}"></button>`).join("")}</div>
           <div class="actions">
-            ${c ? '<button class="btn danger" data-nact="cat-delete" style="margin-right:auto">Delete</button>' : ""}
+            ${c ? `<button class="btn danger" data-nact="cat-delete" style="margin-right:auto">${d.confirm ? "Tap again to delete" : "Delete"}</button>` : ""}
             <button class="btn text" data-nact="close-ndialog">Cancel</button>
             <button class="btn" data-nact="cat-save">${c ? "Save" : "Create"}</button>
           </div>
@@ -626,8 +632,9 @@ window.NowishNotes = function (ctx) {
     const n = card ? findNote(card.dataset.note) : null;
     const ui = ctx.ui;
     switch (act) {
-      case "cat": ui.noteCat = target.dataset.id || null; ui.showTrash = false; ctx.saveUi(); break;
+      case "cat": ui.noteCat = target.dataset.id || null; ui.showTrash = false; ctx.saveUi(); document.getElementById("sidebar")?.classList.remove("open"); break;
       case "cat-new": notesDialog = { type: "category", id: null }; break;
+      case "cat-edit": notesDialog = { type: "category", id: target.dataset.id }; break;
       case "cat-emoji": notesDialog.emoji = target.dataset.v; notesDialog.name = $("#cat-name").value; break;
       case "cat-color": notesDialog.color = target.dataset.v; notesDialog.name = $("#cat-name").value; break;
       case "cat-save": {
@@ -645,7 +652,10 @@ window.NowishNotes = function (ctx) {
         notesDialog = null; ctx.saveData(); ctx.scheduleSync();
         break;
       }
-      case "cat-delete": {
+      case "cat-delete":
+        if (!notesDialog.confirm) { notesDialog.confirm = true; notesDialog.name = $("#cat-name").value; break; }
+      // falls through
+      case "cat-delete-yes": {
         const c = findCat(notesDialog.id);
         if (c) {
           Object.assign(c, { deleted: true, updatedAt: now() });
@@ -691,7 +701,7 @@ window.NowishNotes = function (ctx) {
         });
         return true;
       }
-      case "show-trash": ui.showTrash = true; ctx.saveUi(); break;
+      case "show-trash": ui.showTrash = true; ui.noteQuery = ""; ctx.saveUi(); window.scrollTo(0, 0); break;
       case "open-note": break;
       default: return false;
     }

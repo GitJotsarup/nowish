@@ -195,7 +195,7 @@
     const tabs = `<div class="tabs">
         <button class="tab ${ui.tab === "tasks" ? "on" : ""}" data-act="tab" data-v="tasks">✅ Reminders</button>
         <button class="tab ${ui.tab === "notes" ? "on" : ""}" data-act="tab" data-v="notes">💡 Notes</button></div>`;
-    const nav = ui.tab === "notes" ? notesUi.sidebarHtml(item) : `
+    const nav = ui.tab === "notes" ? notesUi.sidebarHtml() : `
         ${item("space", 'data-space="WORK"', "💼", "Work", !ui.list && ui.space === "WORK", counts("WORK"))}
         ${item("space", 'data-space="PERSONAL"', "🏠", "Personal", !ui.list && ui.space === "PERSONAL", counts("PERSONAL"))}
         ${item("space", 'data-space="BOTH"', "🌗", "Both, side by side", !ui.list && ui.space === "BOTH", 0)}

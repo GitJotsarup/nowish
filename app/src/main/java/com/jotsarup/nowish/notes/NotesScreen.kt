@@ -41,6 +41,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Palette
@@ -49,6 +50,7 @@ import androidx.compose.material.icons.rounded.RestoreFromTrash
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Sell
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -163,6 +165,14 @@ fun NotesRoot(vm: NotesViewModel, bottomBar: @Composable () -> Unit) {
                             onEdit = { categoryDialog = CategoryDialogState(it) },
                             onAdd = { categoryDialog = CategoryDialogState(null) },
                         )
+                        state.categories.find { it.uid == f.category }?.let { selected ->
+                            AssistChip(
+                                onClick = { categoryDialog = CategoryDialogState(selected) },
+                                label = { Text("Edit or delete “${selected.name}”") },
+                                leadingIcon = { Icon(Icons.Rounded.Edit, null, Modifier.size(16.dp)) },
+                                modifier = Modifier.padding(start = 16.dp, bottom = 4.dp),
+                            )
+                        }
                     }
                 }
             },
@@ -473,6 +483,7 @@ fun NoteCard(
     val view = LocalView.current
     val hidden = note.locked && !unlocked
     val ink = noteInk(note.color, note.theme)
+    val shadow = noteTextShadow(note.theme)
     val outline = noteColor(note.color).key == "default" && note.theme == null
     NoteBackground(
         color = note.color,
@@ -486,10 +497,11 @@ fun NoteCard(
     ) {
         Column {
             val images = note.imageList
+            val imageVersion by ImageStore.version.collectAsStateWithLifecycle()
             if (!hidden && images.isNotEmpty()) {
                 Box {
                     AsyncImage(
-                        model = ImageStore.file(context, images.first()),
+                        model = remember(images.first(), imageVersion) { ImageStore.file(context, images.first()).takeIf { it.exists() } },
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
@@ -524,7 +536,7 @@ fun NoteCard(
                             Text(
                                 note.title,
                                 color = ink,
-                                style = MaterialTheme.typography.titleMedium,
+                                style = MaterialTheme.typography.titleMedium.copy(shadow = shadow),
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 3,
                                 overflow = TextOverflow.Ellipsis,
@@ -544,7 +556,7 @@ fun NoteCard(
                                 (if (item.done) "☑  " else "☐  ") + item.text,
                                 color = ink.copy(alpha = if (item.done) 0.55f else 0.9f),
                                 textDecoration = if (item.done) TextDecoration.LineThrough else null,
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.bodyMedium.copy(shadow = shadow),
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(top = 4.dp),
@@ -557,8 +569,8 @@ fun NoteCard(
                         if (text.isNotBlank()) {
                             Text(
                                 text,
-                                color = ink.copy(alpha = 0.88f),
-                                style = MaterialTheme.typography.bodyMedium,
+                                color = ink.copy(alpha = 0.92f),
+                                style = MaterialTheme.typography.bodyMedium.copy(shadow = shadow),
                                 maxLines = 10,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(top = if (note.title.isNotBlank()) 6.dp else 0.dp),

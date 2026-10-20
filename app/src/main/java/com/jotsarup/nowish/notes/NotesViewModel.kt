@@ -139,6 +139,12 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Moves the open note to the trash and closes it (blank notes are just dropped). */
+    fun trashEditing() {
+        if (_editing.value?.isBlank == false) edit { it.copy(trashedAt = System.currentTimeMillis(), pinned = false) }
+        close()
+    }
+
     fun addImage(uri: Uri) {
         viewModelScope.launch {
             val uid = ImageStore.import(app, uri) ?: return@launch

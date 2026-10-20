@@ -267,6 +267,7 @@ class SyncManager(private val app: NowishApp) {
     private fun syncImages(notes: List<Note>) {
         val wanted = notes.filter { !it.deleted }.flatMap { it.imageList }.toSet()
         val uploaded = prefs.uploadedImages.toMutableSet()
+        var downloaded = false
         for (uid in wanted) {
             val file = ImageStore.file(app, uid)
             runCatching {
@@ -275,6 +276,7 @@ class SyncManager(private val app: NowishApp) {
                     if (bytes != null) {
                         file.writeBytes(bytes)
                         uploaded += uid
+                        downloaded = true
                     }
                 } else if (uid !in uploaded) {
                     val body = JSONObject()
@@ -287,6 +289,7 @@ class SyncManager(private val app: NowishApp) {
             }
         }
         prefs.uploadedImages = uploaded
+        if (downloaded) ImageStore.version.value++
     }
 
     private fun httpBytes(url: String): ByteArray? {

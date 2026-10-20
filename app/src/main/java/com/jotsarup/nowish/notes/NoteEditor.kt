@@ -105,6 +105,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.jotsarup.nowish.data.Category
 import com.jotsarup.nowish.data.ChecklistItem
@@ -131,6 +132,7 @@ fun NoteEditor(
     onNewCategory: () -> Unit,
 ) {
     val ink = noteInk(note.color, note.theme)
+    val shadow = noteTextShadow(note.theme)
     var showStyle by remember { mutableStateOf(false) }
     var showCategory by remember { mutableStateOf(false) }
     var showFormat by remember { mutableStateOf(true) }
@@ -142,7 +144,9 @@ fun NoteEditor(
     BackHandler { vm.close() }
 
     // Load the HTML once per note, then push edits back as HTML.
-    LaunchedEffect(note.uid) {
+    val textMode = note.items == null
+    LaunchedEffect(note.uid, textMode) {
+        if (!textMode) return@LaunchedEffect
         rich.setHtml(note.content)
         var baseline = rich.toHtml()
         snapshotFlow { rich.annotatedString }.collect {
@@ -194,8 +198,7 @@ fun NoteEditor(
                             leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null) },
                             onClick = {
                                 menu = false
-                                vm.close()
-                                if (!note.isBlank) vm.trash(note)
+                                vm.trashEditing()
                             },
                         )
                     }
@@ -217,7 +220,7 @@ fun NoteEditor(
                 BasicTextField(
                     value = note.title,
                     onValueChange = { t -> vm.edit { it.copy(title = t.replace("\n", "")) } },
-                    textStyle = MaterialTheme.typography.headlineSmall.copy(color = ink, fontWeight = FontWeight.SemiBold),
+                    textStyle = MaterialTheme.typography.headlineSmall.copy(color = ink, fontWeight = FontWeight.SemiBold, shadow = shadow),
                     cursorBrush = SolidColor(ink),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
                     keyboardActions = KeyboardActions(onNext = { runCatching { bodyFocus.requestFocus() } }),
@@ -230,7 +233,7 @@ fun NoteEditor(
                 Spacer(Modifier.height(10.dp))
                 val items = note.items
                 if (items != null) {
-                    ChecklistEditor(items, ink) { updated -> vm.edit { it.copy(checklist = ChecklistItem.toJson(updated)) } }
+                    ChecklistEditor(items, ink, shadow) { updated -> vm.edit { it.copy(checklist = ChecklistItem.toJson(updated)) } }
                 } else {
                     Box {
                         if (rich.annotatedString.text.isEmpty()) {
@@ -238,7 +241,7 @@ fun NoteEditor(
                         }
                         BasicRichTextEditor(
                             state = rich,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = ink, fontSize = 17.sp, lineHeight = 25.sp),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = ink, fontSize = 17.sp, lineHeight = 25.sp, shadow = shadow),
                             cursorBrush = SolidColor(ink),
                             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                             minLines = 6,
@@ -359,12 +362,13 @@ private fun TextFormatButton(label: String, active: Boolean, ink: Color, onClick
 @Composable
 private fun ImageGrid(images: List<String>, onOpen: (String) -> Unit) {
     val context = LocalContext.current
+    val imageVersion by ImageStore.version.collectAsStateWithLifecycle()
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         images.chunked(if (images.size == 1) 1 else 2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 row.forEach { uid ->
                     AsyncImage(
-                        model = ImageStore.file(context, uid),
+                        model = remember(uid, imageVersion) { ImageStore.file(context, uid).takeIf { it.exists() } },
                         contentDescription = "Image",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
@@ -402,7 +406,12 @@ private fun ImageViewer(uid: String, onRemove: () -> Unit, onDismiss: () -> Unit
 }
 
 @Composable
-private fun ChecklistEditor(items: List<ChecklistItem>, ink: Color, onChange: (List<ChecklistItem>) -> Unit) {
+private fun ChecklistEditor(
+    items: List<ChecklistItem>,
+    ink: Color,
+    shadow: androidx.compose.ui.graphics.Shadow?,
+    onChange: (List<ChecklistItem>) -> Unit,
+) {
     var focusId by remember { mutableStateOf<String?>(null) }
     val open = items.filter { !it.done }
     val done = items.filter { it.done }
@@ -419,7 +428,7 @@ private fun ChecklistEditor(items: List<ChecklistItem>, ink: Color, onChange: (L
     Column {
         open.forEach { item ->
             key(item.id) {
-                ChecklistRow(item, ink, focusId == item.id, { focusId = null }, update, addAfter, remove)
+                ChecklistRow(item, ink, shadow, focusId == item.id, { focusId = null }, update, addAfter, remove)
             }
         }
         Row(
@@ -442,7 +451,7 @@ private fun ChecklistEditor(items: List<ChecklistItem>, ink: Color, onChange: (L
             )
             done.forEach { item ->
                 key(item.id) {
-                    ChecklistRow(item, ink, false, {}, update, addAfter, remove)
+                    ChecklistRow(item, ink, shadow, false, {}, update, addAfter, remove)
                 }
             }
         }
@@ -453,6 +462,7 @@ private fun ChecklistEditor(items: List<ChecklistItem>, ink: Color, onChange: (L
 private fun ChecklistRow(
     item: ChecklistItem,
     ink: Color,
+    shadow: androidx.compose.ui.graphics.Shadow?,
     requestFocus: Boolean,
     onFocused: () -> Unit,
     update: (ChecklistItem) -> Unit,
@@ -482,6 +492,7 @@ private fun ChecklistRow(
             textStyle = MaterialTheme.typography.bodyLarge.copy(
                 color = if (item.done) ink.copy(alpha = 0.55f) else ink,
                 textDecoration = if (item.done) TextDecoration.LineThrough else null,
+                shadow = shadow,
             ),
             cursorBrush = SolidColor(ink),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
