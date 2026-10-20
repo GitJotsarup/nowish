@@ -75,7 +75,10 @@ class MainActivity : FragmentActivity() {
         if (intent == null) return
         intent.getStringExtra(EXTRA_SPACE)
             ?.let { runCatching { Space.valueOf(it) }.getOrNull() }
-            ?.let(vm::openSpace)
+            ?.let {
+                vm.openSpace(it)
+                vm.showRemindersRequested.value = true
+            }
         if (intent.getBooleanExtra(EXTRA_ADD, false)) {
             vm.addRequested.value = true
             intent.removeExtra(EXTRA_ADD)
@@ -92,7 +95,15 @@ class MainActivity : FragmentActivity() {
 private fun AppShell(vm: NowishViewModel, notesVm: NotesViewModel) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val addRequested by vm.addRequested.collectAsStateWithLifecycle()
+    val showReminders by vm.showRemindersRequested.collectAsStateWithLifecycle()
     LaunchedEffect(addRequested) { if (addRequested) tab = 0 }
+    LaunchedEffect(showReminders) {
+        if (showReminders) {
+            tab = 0
+            vm.showRemindersRequested.value = false
+        }
+    }
+    RequestNotificationPermission()
 
     val bottomBar: @Composable () -> Unit = {
         NavigationBar {

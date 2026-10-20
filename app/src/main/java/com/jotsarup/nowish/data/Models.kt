@@ -40,7 +40,13 @@ data class Task(
     @ColumnInfo(defaultValue = "") val uid: String = newUid(),
     @ColumnInfo(defaultValue = "0") val updatedAt: Long = System.currentTimeMillis(),
     @ColumnInfo(defaultValue = "0") val deleted: Boolean = false,
+    /** Set via Today/Tomorrow: once its day arrives it stays in Today instead of going overdue. */
+    @ColumnInfo(defaultValue = "1") val sticky: Boolean = true,
 ) {
+    /** The day this task shows under: sticky tasks never fall into the past. */
+    fun effectiveDue(today: LocalDate): LocalDate? =
+        dueDate?.let { if (sticky && it < today) today else it }
+
     fun reminderAt(): LocalDateTime? =
         if (dueDate != null && reminderTime != null) dueDate.atTime(reminderTime) else null
 }

@@ -82,7 +82,7 @@ class NowishViewModel(application: Application) : AndroidViewModel(application) 
         }
         val tomorrow = today.plusDays(1)
         val grouped = inView.filter { !it.done }.groupBy { t ->
-            val d = t.dueDate
+            val d = t.effectiveDue(today)
             when {
                 d == null -> SectionKind.LATER
                 d < today -> SectionKind.OVERDUE
@@ -91,7 +91,7 @@ class NowishViewModel(application: Application) : AndroidViewModel(application) 
                 else -> SectionKind.UPCOMING
             }
         }
-        val byTime = compareBy<Task>({ it.dueDate }, { it.reminderTime ?: LocalTime.MAX }, { it.createdAt })
+        val byTime = compareBy<Task>({ it.effectiveDue(today) }, { it.reminderTime ?: LocalTime.MAX }, { it.createdAt })
         val sections = SectionKind.entries.mapNotNull { kind ->
             val tasks = grouped[kind].orEmpty()
             if (tasks.isEmpty()) return@mapNotNull null
@@ -132,16 +132,17 @@ class NowishViewModel(application: Application) : AndroidViewModel(application) 
 
     fun configureSync(repo: String, token: String) = app.sync.configure(repo, token)
 
-    fun syncNow() {
-        viewModelScope.launch { app.sync.sync() }
-    }
+    fun syncNow() = viewModelScope.launch { app.sync.sync() }
+
+    /** Ask MainActivity's shell to show the Reminders tab (notification / widget taps). */
+    val showRemindersRequested = MutableStateFlow(false)
 
     fun setSound(on: Boolean) {
         app.prefs.soundOn = on
         _soundOn.value = on
     }
 
-    fun add(title: String, date: LocalDate?, time: LocalTime?) {
+    fun add(title: String, date: LocalDate?, time: LocalTime?, sticky: Boolean) {
         val text = title.trim()
         if (text.isEmpty()) return
         viewModelScope.launch {
@@ -152,18 +153,36 @@ class NowishViewModel(application: Application) : AndroidViewModel(application) 
                     listId = listId.value,
                     dueDate = date,
                     reminderTime = if (date != null) time else null,
+                    sticky = sticky,
                 )
             )
         }
     }
 
+    /** Field-level: re-reads the row so a stale copy can't undo a completion or another edit. */
     fun rename(task: Task, title: String) {
         val text = title.trim()
         if (text.isEmpty() || text == task.title) return
-        viewModelScope.launch { repo.save(task.copy(title = text)) }
+        viewModelScope.launch { repo.update(task.id) { it.copy(title = text) } }
     }
 
-    fun save(task: Task) = viewModelScope.launch { repo.save(task) }
+    /** Applies only what the options sheet edits (date, time, list, space) on top of the latest row. */
+    fun saveOptions(task: Task) = viewModelScope.launch {
+        repo.update(task.id) {
+            it.copy(
+                dueDate = task.dueDate,
+                reminderTime = task.reminderTime,
+                sticky = task.sticky,
+                listId = task.listId,
+                space = task.space,
+            )
+        }
+    }
+
+    fun moveOverdueToToday(tasks: List<Task>) = viewModelScope.launch {
+        val today = LocalDate.now()
+        tasks.forEach { t -> repo.update(t.id) { it.copy(dueDate = today, sticky = true) } }
+    }
 
     fun complete(task: Task) {
         app.sounds.success()

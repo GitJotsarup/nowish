@@ -105,6 +105,8 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.jotsarup.nowish.data.Category
@@ -141,7 +143,15 @@ fun NoteEditor(
     val rich = rememberRichTextState()
     val bodyFocus = remember { FocusRequester() }
 
-    BackHandler { vm.close() }
+    val editingNow by vm.editing.collectAsStateWithLifecycle()
+    BackHandler(enabled = editingNow != null) { vm.close() }
+
+    // Locked notes stay out of screenshots and the recent-apps preview.
+    val activity = LocalContext.current as? android.app.Activity
+    androidx.compose.runtime.DisposableEffect(note.locked) {
+        if (note.locked) activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) }
+    }
 
     // Load the HTML once per note, then push edits back as HTML.
     val textMode = note.items == null
@@ -166,7 +176,9 @@ fun NoteEditor(
         color = note.color,
         theme = note.theme,
         fallback = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) { detectTapGestures { } },
     ) {
         Column(
             Modifier
@@ -418,6 +430,14 @@ private fun ChecklistEditor(
 
     val update: (ChecklistItem) -> Unit = { item -> onChange(items.map { if (it.id == item.id) item else it }) }
     val remove: (ChecklistItem) -> Unit = { item -> onChange(items.filter { it.id != item.id }) }
+    val splitInto: (ChecklistItem, List<String>) -> Unit = { item, rest ->
+        val index = items.indexOfFirst { it.id == item.id }
+        val head = items.map { if (it.id == item.id) it.copy(text = it.text.substringBefore('\n')) else it }.toMutableList()
+        val fresh = rest.map { ChecklistItem(text = it) }
+        head.addAll((index + 1).coerceIn(0, head.size), fresh)
+        onChange(head)
+        focusId = fresh.lastOrNull()?.id
+    }
     val addAfter: (ChecklistItem?) -> Unit = { item ->
         val new = ChecklistItem()
         val index = item?.let { i -> items.indexOfFirst { it.id == i.id } + 1 } ?: items.size
@@ -428,7 +448,7 @@ private fun ChecklistEditor(
     Column {
         open.forEach { item ->
             key(item.id) {
-                ChecklistRow(item, ink, shadow, focusId == item.id, { focusId = null }, update, addAfter, remove)
+                ChecklistRow(item, ink, shadow, focusId == item.id, { focusId = null }, update, addAfter, remove, splitInto)
             }
         }
         Row(
@@ -451,7 +471,7 @@ private fun ChecklistEditor(
             )
             done.forEach { item ->
                 key(item.id) {
-                    ChecklistRow(item, ink, shadow, false, {}, update, addAfter, remove)
+                    ChecklistRow(item, ink, shadow, false, {}, update, addAfter, remove, splitInto)
                 }
             }
         }
@@ -468,6 +488,7 @@ private fun ChecklistRow(
     update: (ChecklistItem) -> Unit,
     addAfter: (ChecklistItem?) -> Unit,
     remove: (ChecklistItem) -> Unit,
+    splitInto: (ChecklistItem, List<String>) -> Unit,
 ) {
     val focus = remember { FocusRequester() }
     LaunchedEffect(requestFocus) {
@@ -488,7 +509,15 @@ private fun ChecklistRow(
         )
         BasicTextField(
             value = item.text,
-            onValueChange = { t -> if (t.contains('\n')) addAfter(item) else update(item.copy(text = t)) },
+            onValueChange = { t ->
+                if (t.contains('\n')) {
+                    val parts = t.split('\n')
+                    update(item.copy(text = parts.first()))
+                    splitInto(item, parts.drop(1))
+                } else {
+                    update(item.copy(text = t))
+                }
+            },
             textStyle = MaterialTheme.typography.bodyLarge.copy(
                 color = if (item.done) ink.copy(alpha = 0.55f) else ink,
                 textDecoration = if (item.done) TextDecoration.LineThrough else null,

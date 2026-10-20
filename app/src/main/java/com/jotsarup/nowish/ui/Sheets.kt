@@ -82,6 +82,10 @@ import java.time.LocalTime
 private fun dateForTime(time: LocalTime, today: LocalDate): LocalDate =
     if (time.isAfter(LocalTime.now())) today else today.plusDays(1)
 
+/** A reminder for a time that's already passed today would never fire, so move it to tomorrow. */
+private fun bumpIfPast(date: LocalDate?, time: LocalTime?, today: LocalDate): LocalDate? =
+    if (date != null && time != null && date <= today && !date.atTime(time).isAfter(java.time.LocalDateTime.now())) today.plusDays(1) else date
+
 private val nextHour: LocalTime get() = LocalTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
 
 // ---------- Quick add ----------
@@ -91,13 +95,14 @@ private val nextHour: LocalTime get() = LocalTime.now().plusHours(1).withMinute(
 fun AddTaskSheet(
     today: LocalDate,
     defaultDate: LocalDate?,
-    onAdd: (String, LocalDate?, LocalTime?) -> Unit,
+    onAdd: (String, LocalDate?, LocalTime?, Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val view = LocalView.current
     val context = LocalContext.current
     var text by remember { mutableStateOf("") }
     var date by remember { mutableStateOf(defaultDate) }
+    var sticky by remember { mutableStateOf(true) }
     var time by remember { mutableStateOf<LocalTime?>(null) }
     var pickDate by remember { mutableStateOf(false) }
     var pickTime by remember { mutableStateOf(false) }
@@ -105,7 +110,7 @@ fun AddTaskSheet(
 
     fun submit() {
         if (text.isBlank()) return
-        onAdd(text, date, time)
+        onAdd(text, bumpIfPast(date, time, today), time, sticky)
         view.confirmHaptic()
         text = ""
         time = null
@@ -141,9 +146,9 @@ fun AddTaskSheet(
             }
             Spacer(Modifier.height(8.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                WhenChip("Today", Icons.Rounded.WbSunny, date == today) { date = today }
-                WhenChip("Tomorrow", Icons.Rounded.NightsStay, date == today.plusDays(1)) { date = today.plusDays(1) }
-                val custom = date?.takeIf { it != today && it != today.plusDays(1) }
+                WhenChip("Today", Icons.Rounded.WbSunny, sticky && date == today) { date = today; sticky = true }
+                WhenChip("Tomorrow", Icons.Rounded.NightsStay, sticky && date == today.plusDays(1)) { date = today.plusDays(1); sticky = true }
+                val custom = date?.takeIf { !sticky }
                 WhenChip(custom?.let { friendlyDate(it, today) } ?: "Pick date", Icons.Rounded.CalendarMonth, custom != null) {
                     pickDate = true
                 }
@@ -158,12 +163,12 @@ fun AddTaskSheet(
     LaunchedEffect(Unit) { focus.requestFocus() }
 
     if (pickDate) {
-        DatePickDialog(date ?: today, onDismiss = { pickDate = false }) { date = it; pickDate = false }
+        DatePickDialog(date ?: today, onDismiss = { pickDate = false }) { date = it; sticky = false; pickDate = false }
     }
     if (pickTime) {
         TimePickDialog(time ?: nextHour, onDismiss = { pickTime = false }) {
             time = it
-            if (date == null) date = dateForTime(it, today)
+            if (date == null) { date = dateForTime(it, today); sticky = true }
             pickTime = false
         }
     }
@@ -209,13 +214,14 @@ fun TaskOptionsSheet(
 
             SheetLabel("When")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                WhenChip("Today", Icons.Rounded.WbSunny, current.dueDate == today) {
-                    apply(current.copy(dueDate = today))
+                val eff = current.effectiveDue(today)
+                WhenChip("Today", Icons.Rounded.WbSunny, current.sticky && eff == today) {
+                    apply(current.copy(dueDate = today, sticky = true))
                 }
-                WhenChip("Tomorrow", Icons.Rounded.NightsStay, current.dueDate == today.plusDays(1)) {
-                    apply(current.copy(dueDate = today.plusDays(1)))
+                WhenChip("Tomorrow", Icons.Rounded.NightsStay, current.sticky && eff == today.plusDays(1)) {
+                    apply(current.copy(dueDate = today.plusDays(1), sticky = true))
                 }
-                val custom = current.dueDate?.takeIf { it != today && it != today.plusDays(1) }
+                val custom = current.dueDate?.takeIf { !current.sticky }
                 WhenChip(custom?.let { friendlyDate(it, today) } ?: "Pick date", Icons.Rounded.CalendarMonth, custom != null) {
                     pickDate = true
                 }
@@ -300,13 +306,15 @@ fun TaskOptionsSheet(
 
     if (pickDate) {
         DatePickDialog(current.dueDate ?: today, onDismiss = { pickDate = false }) {
-            apply(current.copy(dueDate = it))
+            apply(current.copy(dueDate = it, sticky = false))
             pickDate = false
         }
     }
     if (pickTime) {
         TimePickDialog(current.reminderTime ?: nextHour, onDismiss = { pickTime = false }) {
-            apply(current.copy(reminderTime = it, dueDate = current.dueDate ?: dateForTime(it, today)))
+            val date = current.effectiveDue(today) ?: dateForTime(it, today)
+            val bumped = bumpIfPast(date, it, today)
+            apply(current.copy(reminderTime = it, dueDate = bumped, sticky = if (current.dueDate == null || bumped != date) true else current.sticky))
             pickTime = false
         }
     }

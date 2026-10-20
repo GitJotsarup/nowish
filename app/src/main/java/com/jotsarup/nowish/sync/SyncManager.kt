@@ -60,11 +60,16 @@ class SyncManager(private val app: NowishApp) {
     val state: StateFlow<SyncState> = _state.asStateFlow()
 
     /** Debounced sync after a local change. */
+    @Volatile private var pendingWaiting = false
+
     fun requestSync(delayMs: Long = 1500) {
         if (!prefs.syncConfigured) return
-        pending?.cancel()
+        // Only restart the debounce; never cancel a sync that's already talking to GitHub.
+        if (pendingWaiting) pending?.cancel()
+        pendingWaiting = true
         pending = scope.launch {
             delay(delayMs)
+            pendingWaiting = false
             sync()
         }
     }
@@ -95,6 +100,9 @@ class SyncManager(private val app: NowishApp) {
                     }
                     // Someone else wrote in between; refetch and merge again.
                     remoteEtag = null
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    _state.value = _state.value.copy(syncing = false)
+                    throw e
                 } catch (e: SyncException) {
                     error = e.message
                     break
@@ -274,7 +282,10 @@ class SyncManager(private val app: NowishApp) {
                 if (!file.exists()) {
                     val bytes = httpBytes("https://api.github.com/repos/${prefs.syncRepo}/contents/images/$uid.jpg")
                     if (bytes != null) {
-                        file.writeBytes(bytes)
+                        // Write then rename, so a cut-off download is never mistaken for a full image.
+                        val tmp = java.io.File(file.path + ".part")
+                        tmp.writeBytes(bytes)
+                        if (!tmp.renameTo(file)) { tmp.delete(); throw java.io.IOException("rename failed") }
                         uploaded += uid
                         downloaded = true
                     }
@@ -317,7 +328,13 @@ class SyncManager(private val app: NowishApp) {
             304 -> remoteCache
             200 -> {
                 val json = JSONObject(res.body)
-                val content = String(Base64.decode(json.getString("content"), Base64.DEFAULT), Charsets.UTF_8)
+                val encoded = json.optString("content")
+                // Over 1 MB the API omits the content; fetch the raw file instead.
+                val content = if (encoded.isNotEmpty() && json.optString("encoding") != "none") {
+                    String(Base64.decode(encoded, Base64.DEFAULT), Charsets.UTF_8)
+                } else {
+                    httpBytes(fileUrl())?.toString(Charsets.UTF_8) ?: throw SyncException("Couldn't download nowish.json")
+                }
                 remoteSha = json.getString("sha")
                 remoteEtag = res.etag
                 parse(content).also { remoteCache = it }
@@ -412,6 +429,7 @@ class SyncManager(private val app: NowishApp) {
                     title = o.optString("title"),
                     space = space(o.optString("space")),
                     dueDate = o.optStringOrNull("due")?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+                    sticky = o.optBoolean("sticky", true),
                     reminderTime = o.optStringOrNull("time")?.let { runCatching { LocalTime.parse(it) }.getOrNull() },
                     done = o.optBoolean("done"),
                     completedAt = if (o.isNull("completedAt")) null else o.optLong("completedAt"),
@@ -481,6 +499,7 @@ class SyncManager(private val app: NowishApp) {
                     .put("space", t.space.name)
                     .put("list", rt.listUid ?: JSONObject.NULL)
                     .put("due", t.dueDate?.toString() ?: JSONObject.NULL)
+                    .put("sticky", t.sticky)
                     .put("time", t.reminderTime?.format(HHMM) ?: JSONObject.NULL)
                     .put("done", t.done)
                     .put("completedAt", t.completedAt ?: JSONObject.NULL)
@@ -533,7 +552,7 @@ class SyncManager(private val app: NowishApp) {
             .put("updatedAt", System.currentTimeMillis())
             .put("lists", lists)
             .put("tasks", tasks)
-            .toString(1)
+            .toString()
     }
 
     private fun space(s: String) = runCatching { Space.valueOf(s) }.getOrDefault(Space.PERSONAL)

@@ -101,6 +101,9 @@ interface NoteDao {
     @Query("SELECT * FROM notes")
     suspend fun allNotesForSync(): List<Note>
 
+    @Query("SELECT * FROM notes WHERE uid = :uid")
+    suspend fun noteByUid(uid: String): Note?
+
     @Query("SELECT * FROM notes WHERE categoryUid = :uid AND deleted = 0")
     suspend fun notesInCategory(uid: String): List<Note>
 
@@ -132,6 +135,12 @@ interface NoteDao {
     suspend fun updateCategory(category: Category)
 }
 
+private val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `sticky` INTEGER NOT NULL DEFAULT 1")
+    }
+}
+
 private val MIGRATION_2_3 = object : Migration(2, 3) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(
@@ -153,7 +162,7 @@ private val MIGRATION_2_3 = object : Migration(2, 3) {
 
 @Database(
     entities = [Task::class, TaskList::class, Note::class, Category::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -164,7 +173,7 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "nowish.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }

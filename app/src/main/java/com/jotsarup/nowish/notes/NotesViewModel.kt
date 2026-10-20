@@ -78,12 +78,21 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
     // ---------- lock ----------
     fun refreshLock() = filter.update { it.copy(lockConfigured = app.prefs.lockConfigured) }
     fun unlock() = filter.update { it.copy(unlocked = true) }
-    fun relock() = filter.update { it.copy(unlocked = false) }
-    fun checkPin(pin: String): Boolean = repo.checkPin(pin).also { if (it) unlock() }
-    fun setPin(pin: String) {
+    /** Hides locked notes again, and closes one if it's open. */
+    fun relock() {
+        filter.update { it.copy(unlocked = false) }
+        if (_editing.value?.locked == true) close()
+    }
+    suspend fun checkPin(pin: String): Boolean = repo.checkPin(pin).also { if (it) unlock() }
+    fun setPin(pin: String, then: () -> Unit) = viewModelScope.launch {
         repo.setPin(pin)
         filter.update { it.copy(lockConfigured = true, unlocked = true) }
+        then()
     }
+
+    /** Last note sent to the trash, so the screen can offer Undo. */
+    val lastTrashed = MutableStateFlow<Note?>(null)
+    fun undoTrash(note: Note) = viewModelScope.launch { repo.restoreByUid(note.uid) }
     val biometricEnabled: Boolean get() = app.prefs.biometricUnlock
 
     // ---------- editor ----------
@@ -141,14 +150,24 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Moves the open note to the trash and closes it (blank notes are just dropped). */
     fun trashEditing() {
-        if (_editing.value?.isBlank == false) edit { it.copy(trashedAt = System.currentTimeMillis(), pinned = false) }
+        val note = _editing.value
+        if (note != null && !note.isBlank) {
+            edit { it.copy(trashedAt = System.currentTimeMillis(), pinned = false) }
+            lastTrashed.value = note
+        }
         close()
     }
 
     fun addImage(uri: Uri) {
+        val target = _editing.value?.uid ?: return
         viewModelScope.launch {
             val uid = ImageStore.import(app, uri) ?: return@launch
-            edit { it.copy(images = imagesJson(it.imageList + uid)) }
+            if (_editing.value?.uid == target) {
+                edit { it.copy(images = imagesJson(it.imageList + uid)) }
+            } else {
+                // The note was closed (or another opened) while the photo was decoding.
+                saveMutex.withLock { repo.appendImage(target, uid) }
+            }
         }
     }
 
@@ -169,7 +188,10 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
     // ---------- grid actions ----------
     fun save(note: Note) = viewModelScope.launch { repo.save(note) }
     fun togglePin(note: Note) = save(note.copy(pinned = !note.pinned))
-    fun trash(note: Note) = viewModelScope.launch { repo.trash(note) }
+    fun trash(note: Note) = viewModelScope.launch {
+        repo.trash(note)
+        lastTrashed.value = note
+    }
     fun restore(note: Note) = viewModelScope.launch { repo.restore(note) }
     fun deleteForever(note: Note) = viewModelScope.launch { repo.deleteForever(listOf(note)) }
     fun emptyTrash() = viewModelScope.launch { repo.deleteForever(state.value.trash) }

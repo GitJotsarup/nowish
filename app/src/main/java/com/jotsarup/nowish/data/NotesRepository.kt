@@ -67,7 +67,17 @@ class NotesRepository(
 
     // ---------- lock ----------
 
-    fun setPin(pin: String) {
+    suspend fun appendImage(noteUid: String, imageUid: String) {
+        val n = dao.noteByUid(noteUid) ?: return
+        save(n.copy(images = imagesJson(n.imageList + imageUid)))
+    }
+
+    suspend fun restoreByUid(uid: String) {
+        dao.noteByUid(uid)?.takeIf { !it.deleted }?.let { restore(it) }
+    }
+
+    // PBKDF2 with 120k rounds takes a moment, so it runs off the main thread.
+    suspend fun setPin(pin: String) = kotlinx.coroutines.withContext(Dispatchers.Default) {
         val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
         prefs.lockSalt = Base64.encodeToString(salt, Base64.NO_WRAP)
         prefs.lockHash = hashPin(pin, salt)
@@ -75,9 +85,9 @@ class NotesRepository(
         onChanged()
     }
 
-    fun checkPin(pin: String): Boolean {
-        val salt = prefs.lockSalt ?: return false
-        return hashPin(pin, Base64.decode(salt, Base64.NO_WRAP)) == prefs.lockHash
+    suspend fun checkPin(pin: String): Boolean = kotlinx.coroutines.withContext(Dispatchers.Default) {
+        val salt = prefs.lockSalt ?: return@withContext false
+        hashPin(pin, Base64.decode(salt, Base64.NO_WRAP)) == prefs.lockHash
     }
 
     companion object {

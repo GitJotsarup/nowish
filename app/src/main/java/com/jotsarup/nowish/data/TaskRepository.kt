@@ -37,8 +37,21 @@ class TaskRepository(
         onChanged()
     }
 
+    /** Re-reads the task and applies [change] to the latest copy. */
+    suspend fun update(id: Long, change: (Task) -> Task) {
+        val current = dao.task(id)?.takeIf { !it.deleted } ?: return
+        save(change(current))
+    }
+
+    /** Snooze: move the reminder to an hour from now (persisted, so reboots and syncs keep it). */
+    suspend fun snooze(id: Long, minutes: Long = 60) {
+        val at = java.time.LocalDateTime.now().plusMinutes(minutes).withSecond(0).withNano(0)
+        update(id) { it.copy(dueDate = at.toLocalDate(), reminderTime = at.toLocalTime(), sticky = true) }
+    }
+
     suspend fun setDone(task: Task, done: Boolean) {
-        val updated = task.copy(
+        val latest = dao.task(task.id) ?: task
+        val updated = latest.copy(
             done = done,
             completedAt = if (done) now() else null,
             updatedAt = now(),

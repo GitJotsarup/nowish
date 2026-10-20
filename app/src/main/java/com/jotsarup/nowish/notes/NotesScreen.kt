@@ -50,6 +50,11 @@ import androidx.compose.material.icons.rounded.RestoreFromTrash
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Sell
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -103,6 +108,17 @@ fun NotesRoot(vm: NotesViewModel, bottomBar: @Composable () -> Unit) {
     var categoryDialog by remember { mutableStateOf<CategoryDialogState?>(null) }
     var pendingUnlock by remember { mutableStateOf<(() -> Unit)?>(null) }
     var askSetPin by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var confirmEmptyTrash by remember { mutableStateOf(false) }
+    val snackbar = remember { SnackbarHostState() }
+    val lastTrashed by vm.lastTrashed.collectAsStateWithLifecycle()
+    LaunchedEffect(lastTrashed) {
+        val note = lastTrashed ?: return@LaunchedEffect
+        vm.lastTrashed.value = null
+        snackbar.currentSnackbarData?.dismiss()
+        if (snackbar.showSnackbar("Note moved to trash", "Undo", duration = SnackbarDuration.Short) == SnackbarResult.ActionPerformed) {
+            vm.undoTrash(note)
+        }
+    }
 
     /** Runs [action] once locked notes are unlocked (asks for PIN / fingerprint if needed). */
     fun withUnlock(action: () -> Unit) {
@@ -127,6 +143,7 @@ fun NotesRoot(vm: NotesViewModel, bottomBar: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             bottomBar = bottomBar,
+            snackbarHost = { SnackbarHost(snackbar) },
             floatingActionButton = {
                 if (!f.showTrash) {
                     FloatingActionButton(
@@ -147,7 +164,7 @@ fun NotesRoot(vm: NotesViewModel, bottomBar: @Composable () -> Unit) {
                         TrashBar(
                             count = state.trash.size,
                             onBack = { vm.showTrash(false) },
-                            onEmpty = { vm.emptyTrash() },
+                            onEmpty = { confirmEmptyTrash = true },
                         )
                     } else {
                         SearchBar(
@@ -255,6 +272,7 @@ fun NotesRoot(vm: NotesViewModel, bottomBar: @Composable () -> Unit) {
     actionsFor?.let { note ->
         NoteActionsSheet(
             note = note,
+            hideContent = note.locked && !f.unlocked,
             categories = state.categories,
             onDismiss = { actionsFor = null },
             onPin = { vm.togglePin(note) },
@@ -275,7 +293,7 @@ fun NotesRoot(vm: NotesViewModel, bottomBar: @Composable () -> Unit) {
     trashDialog?.let { note ->
         AlertDialog(
             onDismissRequest = { trashDialog = null },
-            title = { Text(note.title.ifBlank { "This note" }) },
+            title = { Text(if (note.locked && !f.unlocked) "Locked note" else note.title.ifBlank { "This note" }) },
             text = { Text("Restore it, or delete it forever?") },
             confirmButton = {
                 TextButton(onClick = { vm.restore(note); trashDialog = null }) {
@@ -318,12 +336,33 @@ fun NotesRoot(vm: NotesViewModel, bottomBar: @Composable () -> Unit) {
         )
     }
 
+    if (confirmEmptyTrash) {
+        EmptyTrashDialog(
+            count = state.trash.size,
+            onConfirm = { vm.emptyTrash(); confirmEmptyTrash = false },
+            onDismiss = { confirmEmptyTrash = false },
+        )
+    }
+
     askSetPin?.let { then ->
         SetPinDialog(
-            onSet = { pin -> vm.setPin(pin); askSetPin = null; then() },
+            onSet = { pin -> askSetPin = null; vm.setPin(pin, then) },
             onDismiss = { askSetPin = null },
         )
     }
+}
+
+@Composable
+private fun EmptyTrashDialog(count: Int, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Empty the trash?") },
+        text = { Text("$count note${if (count == 1) "" else "s"} will be deleted for good, on every device.") },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Empty trash", color = MaterialTheme.colorScheme.error) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 data class CategoryDialogState(val category: Category?, val assignToEditing: Boolean = false)
@@ -626,6 +665,7 @@ private fun EmptyNotes(trash: Boolean, searching: Boolean, modifier: Modifier = 
 @Composable
 private fun NoteActionsSheet(
     note: Note,
+    hideContent: Boolean,
     categories: List<Category>,
     onDismiss: () -> Unit,
     onPin: () -> Unit,
@@ -640,7 +680,7 @@ private fun NoteActionsSheet(
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(bottom = 16.dp)) {
             Text(
-                note.title.ifBlank { note.plainText.take(40).ifBlank { "Note" } },
+                if (hideContent) "Locked note" else note.title.ifBlank { note.plainText.take(40).ifBlank { "Note" } },
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

@@ -32,6 +32,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import kotlinx.coroutines.launch
 
 fun canUseBiometric(activity: FragmentActivity): Boolean =
     BiometricManager.from(activity).canAuthenticate(BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
@@ -57,7 +58,7 @@ fun promptBiometric(activity: FragmentActivity, onSuccess: () -> Unit) {
 /** Asks for the notes PIN (with a fingerprint shortcut). Calls [onUnlocked] on success. */
 @Composable
 fun UnlockDialog(
-    checkPin: (String) -> Boolean,
+    checkPin: suspend (String) -> Boolean,
     allowBiometric: Boolean,
     onUnlocked: () -> Unit,
     onDismiss: () -> Unit,
@@ -72,10 +73,18 @@ fun UnlockDialog(
         if (biometric) promptBiometric(activity!!) { onUnlocked() } else focus.requestFocus()
     }
 
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var checking by remember { mutableStateOf(false) }
     fun submit() {
-        if (checkPin(pin)) onUnlocked() else {
-            error = true
-            pin = ""
+        if (checking) return
+        checking = true
+        scope.launch {
+            val ok = checkPin(pin)
+            checking = false
+            if (ok) onUnlocked() else {
+                error = true
+                pin = ""
+            }
         }
     }
 
@@ -104,7 +113,7 @@ fun UnlockDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = ::submit, enabled = pin.length >= 4) { Text("Unlock") } },
+        confirmButton = { TextButton(onClick = ::submit, enabled = pin.length >= 4 && !checking) { Text(if (checking) "Checking…" else "Unlock") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

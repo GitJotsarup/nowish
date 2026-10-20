@@ -127,9 +127,8 @@ fun NowishRoot(vm: NowishViewModel, bottomBar: @Composable () -> Unit = {}) {
             vm.addRequested.value = false
         }
     }
-    LaunchedEffect(syncState.syncing) { if (!syncState.syncing) refreshing = false }
 
-    RequestNotificationPermission()
+
 
     fun showUndo(message: String, onUndo: () -> Unit) {
         scope.launch {
@@ -210,7 +209,8 @@ fun NowishRoot(vm: NowishViewModel, bottomBar: @Composable () -> Unit = {}) {
                     onRefresh = {
                         if (syncState.configured) {
                             refreshing = true
-                            vm.syncNow()
+                            // Clears even when sync fails instantly (offline).
+                            scope.launch { vm.syncNow().join(); refreshing = false }
                         } else {
                             showSync = true
                         }
@@ -234,6 +234,10 @@ fun NowishRoot(vm: NowishViewModel, bottomBar: @Composable () -> Unit = {}) {
                         onRestore = { vm.uncomplete(it) },
                         onDeleteCompleted = { vm.delete(it) },
                         onClearCompleted = vm::clearCompleted,
+                        onOverdueToToday = { tasks ->
+                            vm.moveOverdueToToday(tasks)
+                            showUndoMessage(snackbar, scope, "Moved ${tasks.size} to today")
+                        },
                     )
                 }
             }
@@ -255,7 +259,7 @@ fun NowishRoot(vm: NowishViewModel, bottomBar: @Composable () -> Unit = {}) {
             task = task,
             today = state.today,
             lists = state.lists,
-            onUpdate = { vm.save(it) },
+            onUpdate = { vm.saveOptions(it) },
             onComplete = ::complete,
             onDelete = ::delete,
             onDismiss = { optionsFor = null },
@@ -405,6 +409,7 @@ private fun TaskListContent(
     onRestore: (Task) -> Unit,
     onDeleteCompleted: (Task) -> Unit,
     onClearCompleted: () -> Unit,
+    onOverdueToToday: (List<Task>) -> Unit = {},
 ) {
     val listsById = remember(state.lists) { state.lists.associateBy { it.id } }
     LazyColumn(
@@ -423,7 +428,11 @@ private fun TaskListContent(
         state.sections.forEach { section ->
             if (!onlyAnytime) {
                 item(key = "h-${section.kind}") {
-                    SectionHeader(section, Modifier.animateItem())
+                    SectionHeader(
+                        section,
+                        Modifier.animateItem(),
+                        onMoveToToday = if (section.kind == SectionKind.OVERDUE) ({ onOverdueToToday(section.tasks) }) else null,
+                    )
                 }
             }
             items(section.tasks, key = { "t-${it.id}" }) { task ->
@@ -469,7 +478,7 @@ private fun TaskListContent(
 }
 
 @Composable
-private fun SectionHeader(section: Section, modifier: Modifier = Modifier) {
+private fun SectionHeader(section: Section, modifier: Modifier = Modifier, onMoveToToday: (() -> Unit)? = null) {
     val color = when (section.kind) {
         SectionKind.OVERDUE -> MaterialTheme.colorScheme.error
         SectionKind.TODAY -> MaterialTheme.colorScheme.primary
@@ -489,6 +498,17 @@ private fun SectionHeader(section: Section, modifier: Modifier = Modifier) {
         ) {
             Text("${section.tasks.size}", style = MaterialTheme.typography.labelMedium, color = color)
         }
+        if (onMoveToToday != null) {
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onMoveToToday) { Text("Move all to today") }
+        }
+    }
+}
+
+private fun showUndoMessage(snackbar: SnackbarHostState, scope: kotlinx.coroutines.CoroutineScope, message: String) {
+    scope.launch {
+        snackbar.currentSnackbarData?.dismiss()
+        snackbar.showSnackbar(message, duration = SnackbarDuration.Short)
     }
 }
 
@@ -654,15 +674,19 @@ private fun DrawerContent(
     }
 }
 
+/** Asks once per install (not every time you come back to Reminders). */
 @Composable
-private fun RequestNotificationPermission() {
+fun RequestNotificationPermission() {
     if (Build.VERSION.SDK_INT < 33) return
     val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LaunchedEffect(Unit) {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+        val prefs = context.getSharedPreferences("nowish", android.content.Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("asked_notifications", false) &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
+            prefs.edit().putBoolean("asked_notifications", true).apply()
             launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }

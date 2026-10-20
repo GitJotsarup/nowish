@@ -48,9 +48,9 @@ class TaskActionReceiver : BroadcastReceiver() {
                 if (app.repository.complete(id)) app.sounds.success()
                 Notifications.cancel(context, id)
             }
-            ACTION_SNOOZE -> {
+            ACTION_SNOOZE -> runAsync {
                 Notifications.cancel(context, id)
-                ReminderScheduler.scheduleAt(context, id, System.currentTimeMillis() + 60 * 60 * 1000L)
+                app.repository.snooze(id)
             }
         }
     }

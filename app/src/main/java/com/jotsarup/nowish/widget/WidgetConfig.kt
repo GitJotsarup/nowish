@@ -90,7 +90,7 @@ fun buildWidgetRows(
         WidgetView.LIST -> tasks.filter { t -> t.listId?.let(listsById::get)?.uid == config.listUid }
         else -> tasks.filter { config.space == null || it.space == config.space }
     }.filter { t ->
-        val d = t.dueDate
+        val d = t.effectiveDue(today)
         when (config.view) {
             WidgetView.TODAY -> d != null && d <= today
             WidgetView.UPCOMING -> d != null && d > today
@@ -100,7 +100,7 @@ fun buildWidgetRows(
     }
 
     fun section(t: Task): Int {
-        val d = t.dueDate
+        val d = t.effectiveDue(today)
         return when {
             d == null -> 4
             d < today -> 0
@@ -111,7 +111,7 @@ fun buildWidgetRows(
     }
     val names = listOf("Overdue", "Today", "Tomorrow", "Upcoming", if (config.view == WidgetView.LIST) "Anytime" else "Later")
     val grouped = pool
-        .sortedWith(compareBy<Task>({ it.dueDate ?: LocalDate.MAX }, { it.reminderTime ?: LocalTime.MAX }, { it.createdAt }))
+        .sortedWith(compareBy<Task>({ it.effectiveDue(today) ?: LocalDate.MAX }, { it.reminderTime ?: LocalTime.MAX }, { it.createdAt }))
         .groupBy(::section)
         .toSortedMap()
     val showHeaders = grouped.size > 1
