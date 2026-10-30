@@ -36,6 +36,15 @@ class NoteFlowTest {
         device.waitForIdle()
         Thread.sleep(300)
     }
+
+    /** Long text arrives a few characters at a time, so wait for the end of it to land. */
+    private fun waitForBody(ending: String) {
+        repeat(100) {
+            if (bodyText().endsWith(ending)) return
+            Thread.sleep(200)
+        }
+        assertEquals(ending, bodyText().takeLast(ending.length))
+    }
     private fun key(code: Int) {
         shell("input keyevent $code")
         device.waitForIdle()
@@ -132,6 +141,7 @@ class NoteFlowTest {
         type("numbered one"); enter()
         type("numbered two"); enter(); enter()
         type("a long paragraph that keeps going and going until it wraps across more than one line on the screen for sure")
+        waitForBody("for sure")
         shot("02-mixed-content")
         assertEquals(
             "<p>Short first line</p><p>Another</p><ul><li>bullet item</li><li>second bullet</li></ul>" +
@@ -191,9 +201,35 @@ class NoteFlowTest {
         device.wait(Until.findObject(By.res(pkg, "note_body")), 5_000)
         assertEquals("<ul><li>milk</li><li>eggs</li></ul><p><b>bold text</b></p>", bodyHtml())
         shot("06-reopened")
+        val saved = bodyHtml()
         shell("cmd uimode night yes")
         Thread.sleep(1_500)
+        device.wait(Until.findObject(By.res(pkg, "note_body")), 5_000)
         shot("07-dark")
+        assertEquals("theme change must not alter the note", saved, bodyHtml())
         device.pressBack()
+    }
+
+    @Test fun restartingTheScreenKeepsListsIntact() {
+        newNote("Rotate")
+        tapDesc("Numbered list")
+        type("one"); enter()
+        type("two"); enter(); enter()
+        type("plain line")
+        waitForBody("plain line")
+        val html = "<ol><li>one</li><li>two</li></ol><p>plain line</p>"
+        assertEquals(html, bodyHtml())
+        Thread.sleep(800) // autosave
+        scenario.recreate()
+        device.wait(Until.findObject(By.res(pkg, "note_body")), 5_000)
+        Thread.sleep(500)
+        assertEquals(html, bodyHtml())
+        assertEquals("1. one\n2. two\nplain line", bodyText())
+        shot("08-after-restart")
+        // Still a live list after the restart, and typing doesn't go wrong.
+        tapLine(1, fromRight = 12)
+        enter()
+        type("three")
+        assertEquals("<ol><li>one</li><li>two</li><li>three</li></ol><p>plain line</p>", bodyHtml())
     }
 }

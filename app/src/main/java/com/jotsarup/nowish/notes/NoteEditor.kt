@@ -278,7 +278,8 @@ fun NoteEditor(
                 }
                 Spacer(Modifier.weight(1f))
                 Text(
-                    "Edited " + DateUtils.getRelativeTimeSpanString(note.updatedAt, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS),
+                    if (System.currentTimeMillis() - note.updatedAt < DateUtils.MINUTE_IN_MILLIS) "Edited just now"
+                    else "Edited " + DateUtils.getRelativeTimeSpanString(note.updatedAt, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS),
                     color = ink.copy(alpha = 0.7f),
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(end = 16.dp),

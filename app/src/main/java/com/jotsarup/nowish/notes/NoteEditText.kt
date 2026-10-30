@@ -160,6 +160,9 @@ class NoteEditText(context: Context) : EditText(context) {
         setLineSpacing(0f, 1.25f)
         hint = "Note"
         id = R.id.note_body
+        // The note lives in the ViewModel. Android restoring the raw text after a rotation or
+        // theme change would drop our list marks and corrupt the note.
+        isSaveEnabled = false
         addTextChangedListener(watcher)
         ready = true
     }
