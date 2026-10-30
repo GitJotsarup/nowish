@@ -98,6 +98,16 @@ class NoteFlowTest {
         shell("mkdir -p /data/local/tmp/shots")
         shell("pm grant $pkg android.permission.POST_NOTIFICATIONS")
         scenario = ActivityScenario.launch(MainActivity::class.java)
+        // Slow CI emulators can pop up "System UI isn't responding" over the app.
+        repeat(6) {
+            if (device.wait(Until.hasObject(By.text("Notes")), 5_000)) {
+                tapText("Notes")
+                return
+            }
+            device.findObject(By.text("Wait"))?.click()
+            device.findObject(By.text("Close app"))?.click()
+        }
+        shot("startup-failure")
         tapText("Notes")
     }
 
