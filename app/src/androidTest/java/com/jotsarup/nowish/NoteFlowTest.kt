@@ -90,12 +90,8 @@ class NoteFlowTest {
         device.waitForIdle()
         Thread.sleep(350)
     }
-    private fun lineEnd(line: Int) = onBox { box ->
-        val layout = box.layout
-        var end = layout.getLineEnd(line)
-        if (end > 0 && end <= box.length() && box.text[end - 1] == '\n') end--
-        end
-    }
+    /** The end of the visible text; a soft-wrapped line's trailing space doesn't count. */
+    private fun lineEnd(line: Int) = onBox { it.layout.getLineVisibleEnd(line) }
     private fun lineCount() = onBox { it.layout.lineCount }
 
     @Before fun start() {
