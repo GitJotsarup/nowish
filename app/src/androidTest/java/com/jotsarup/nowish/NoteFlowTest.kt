@@ -151,7 +151,8 @@ class NoteFlowTest {
         val lines = lineCount()
         assertTrue("paragraph should wrap", lines >= 8)
         // The bug: tapping past the end of a line jumped to the start of the next one.
-        for (line in 0 until lines) {
+        // Bottom-up: the cursor's teardrop handle sits under the caret, and tapping it does nothing.
+        for (line in lines - 1 downTo 0) {
             tapLine(line, fromRight = 12)
             assertEquals("tap past end of visual line $line", lineEnd(line), caret())
         }
