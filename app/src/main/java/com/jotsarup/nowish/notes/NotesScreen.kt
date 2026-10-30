@@ -94,6 +94,7 @@ import coil.compose.AsyncImage
 import com.jotsarup.nowish.data.Category
 import com.jotsarup.nowish.data.ImageStore
 import com.jotsarup.nowish.data.Note
+import com.jotsarup.nowish.data.NoteDoc
 import com.jotsarup.nowish.ui.confirmHaptic
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -604,7 +605,12 @@ fun NoteCard(
                         val more = items.count { it.text.isNotBlank() } - shown.size
                         if (more > 0) Text("+ $more more", color = ink.copy(alpha = 0.6f), style = MaterialTheme.typography.labelMedium)
                     } else {
-                        val text = note.plainText
+                        val text = remember(note.content) {
+                            val blocks = NoteDoc.parse(note.content).blocks
+                                .dropWhile { it.text.isBlank() }
+                                .dropLastWhile { it.text.isBlank() }
+                            noteAnnotated(NoteDoc(blocks))
+                        }
                         if (text.isNotBlank()) {
                             Text(
                                 text,

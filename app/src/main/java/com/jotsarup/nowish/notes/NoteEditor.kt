@@ -104,7 +104,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.window.DialogProperties
+import com.jotsarup.nowish.data.BlockType
+import com.jotsarup.nowish.data.Inline
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -113,16 +116,6 @@ import com.jotsarup.nowish.data.Category
 import com.jotsarup.nowish.data.ChecklistItem
 import com.jotsarup.nowish.data.ImageStore
 import com.jotsarup.nowish.data.Note
-import com.mohamedrejeb.richeditor.model.rememberRichTextState
-import com.mohamedrejeb.richeditor.ui.BasicRichTextEditor
-
-private val BoldStyle = SpanStyle(fontWeight = FontWeight.Bold)
-private val ItalicStyle = SpanStyle(fontStyle = FontStyle.Italic)
-private val UnderlineStyle = SpanStyle(textDecoration = TextDecoration.Underline)
-private val StrikeStyle = SpanStyle(textDecoration = TextDecoration.LineThrough)
-private val H1Style = SpanStyle(fontSize = 1.5.em, fontWeight = FontWeight.Bold)
-private val H2Style = SpanStyle(fontSize = 1.2.em, fontWeight = FontWeight.Bold)
-private val MarkStyle = SpanStyle(background = Color.Yellow) // exported as <mark>
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -140,8 +133,9 @@ fun NoteEditor(
     var showFormat by remember { mutableStateOf(true) }
     var menu by remember { mutableStateOf(false) }
     var viewing by remember { mutableStateOf<String?>(null) }
-    val rich = rememberRichTextState()
-    val bodyFocus = remember { FocusRequester() }
+    val body = remember(note.uid) { NoteBodyController() }
+    val scroll = rememberScrollState()
+    var viewport by remember { mutableStateOf(0) }
 
     val editingNow by vm.editing.collectAsStateWithLifecycle()
     BackHandler(enabled = editingNow != null) { vm.close() }
@@ -151,21 +145,6 @@ fun NoteEditor(
     androidx.compose.runtime.DisposableEffect(note.locked) {
         if (note.locked) activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         onDispose { activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) }
-    }
-
-    // Load the HTML once per note, then push edits back as HTML.
-    val textMode = note.items == null
-    LaunchedEffect(note.uid, textMode) {
-        if (!textMode) return@LaunchedEffect
-        rich.setHtml(note.content)
-        var baseline = rich.toHtml()
-        snapshotFlow { rich.annotatedString }.collect {
-            val html = rich.toHtml()
-            if (html != baseline) {
-                baseline = html
-                vm.edit { n -> n.copy(content = html) }
-            }
-        }
     }
 
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(6)) { uris ->
@@ -221,7 +200,8 @@ fun NoteEditor(
             Column(
                 Modifier
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
+                    .onSizeChanged { viewport = it.height }
+                    .verticalScroll(scroll)
                     .padding(horizontal = 20.dp)
             ) {
                 val images = note.imageList
@@ -235,7 +215,7 @@ fun NoteEditor(
                     textStyle = MaterialTheme.typography.headlineSmall.copy(color = ink, fontWeight = FontWeight.SemiBold, shadow = shadow),
                     cursorBrush = SolidColor(ink),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
-                    keyboardActions = KeyboardActions(onNext = { runCatching { bodyFocus.requestFocus() } }),
+                    keyboardActions = KeyboardActions(onNext = { body.focus() }),
                     modifier = Modifier.fillMaxWidth(),
                     decorationBox = { inner ->
                         if (note.title.isEmpty()) Text("Title", style = MaterialTheme.typography.headlineSmall, color = ink.copy(alpha = 0.45f))
@@ -247,17 +227,15 @@ fun NoteEditor(
                 if (items != null) {
                     ChecklistEditor(items, ink, shadow) { updated -> vm.edit { it.copy(checklist = ChecklistItem.toJson(updated)) } }
                 } else {
-                    Box {
-                        if (rich.annotatedString.text.isEmpty()) {
-                            Text("Note", style = MaterialTheme.typography.bodyLarge, color = ink.copy(alpha = 0.45f))
-                        }
-                        BasicRichTextEditor(
-                            state = rich,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = ink, fontSize = 17.sp, lineHeight = 25.sp, shadow = shadow),
-                            cursorBrush = SolidColor(ink),
-                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                            minLines = 6,
-                            modifier = Modifier.fillMaxWidth().focusRequester(bodyFocus),
+                    key(note.uid) {
+                        NoteBody(
+                            html = note.content,
+                            ink = ink,
+                            shadow = shadow,
+                            controller = body,
+                            scroll = scroll,
+                            viewportHeight = viewport,
+                            onChange = { html -> vm.edit { it.copy(content = html) } },
                         )
                     }
                 }
@@ -278,30 +256,7 @@ fun NoteEditor(
 
             // ---- formatting ----
             if (showFormat && note.items == null) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val s = rich.currentSpanStyle
-                    FormatButton(Icons.Rounded.FormatBold, "Bold", s.fontWeight == FontWeight.Bold, ink) { rich.toggleSpanStyle(BoldStyle) }
-                    FormatButton(Icons.Rounded.FormatItalic, "Italic", s.fontStyle == FontStyle.Italic, ink) { rich.toggleSpanStyle(ItalicStyle) }
-                    FormatButton(Icons.Rounded.FormatUnderlined, "Underline", s.textDecoration?.contains(TextDecoration.Underline) == true, ink) { rich.toggleSpanStyle(UnderlineStyle) }
-                    FormatButton(Icons.Rounded.StrikethroughS, "Strikethrough", s.textDecoration?.contains(TextDecoration.LineThrough) == true, ink) { rich.toggleSpanStyle(StrikeStyle) }
-                    TextFormatButton("H1", s.fontSize == H1Style.fontSize, ink) { rich.toggleSpanStyle(H1Style) }
-                    TextFormatButton("H2", s.fontSize == H2Style.fontSize, ink) { rich.toggleSpanStyle(H2Style) }
-                    FormatButton(Icons.Rounded.Highlight, "Highlight", s.background == Color.Yellow, ink) { rich.toggleSpanStyle(MarkStyle) }
-                    @Suppress("DEPRECATION")
-                    FormatButton(Icons.Rounded.FormatListBulleted, "Bulleted list", rich.isUnorderedList, ink) { rich.toggleUnorderedList() }
-                    FormatButton(Icons.Rounded.FormatListNumbered, "Numbered list", rich.isOrderedList, ink) { rich.toggleOrderedList() }
-                    FormatButton(Icons.Rounded.Code, "Code", rich.isCodeSpan, ink) { rich.toggleCodeSpan() }
-                    FormatButton(Icons.Rounded.FormatClear, "Clear formatting", false, ink) {
-                        listOf(BoldStyle, ItalicStyle, UnderlineStyle, StrikeStyle, H1Style, H2Style, MarkStyle)
-                            .forEach { rich.removeSpanStyle(it) }
-                    }
-                }
+                FormatBar(body, ink)
             }
 
             // ---- bottom bar ----
@@ -345,6 +300,34 @@ fun NoteEditor(
     }
     viewing?.let { uid ->
         ImageViewer(uid, onRemove = { vm.removeImage(uid); viewing = null }, onDismiss = { viewing = null })
+    }
+}
+
+@Composable
+private fun FormatBar(body: NoteBodyController, ink: Color) {
+    val f = body.format
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(ink.copy(alpha = 0.08f))
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        @Suppress("DEPRECATION")
+        FormatButton(Icons.Rounded.FormatListBulleted, "Bulleted list", f.list == BlockType.BULLET, ink) { body.toggleList(BlockType.BULLET) }
+        FormatButton(Icons.Rounded.FormatListNumbered, "Numbered list", f.list == BlockType.NUMBER, ink) { body.toggleList(BlockType.NUMBER) }
+        FormatButton(Icons.Rounded.FormatBold, "Bold", Inline.BOLD in f.styles, ink) { body.toggle(Inline.BOLD) }
+        FormatButton(Icons.Rounded.FormatItalic, "Italic", Inline.ITALIC in f.styles, ink) { body.toggle(Inline.ITALIC) }
+        FormatButton(Icons.Rounded.FormatUnderlined, "Underline", Inline.UNDERLINE in f.styles, ink) { body.toggle(Inline.UNDERLINE) }
+        FormatButton(Icons.Rounded.StrikethroughS, "Strikethrough", Inline.STRIKE in f.styles, ink) { body.toggle(Inline.STRIKE) }
+        TextFormatButton("H1", f.heading == 1, ink) { body.toggleHeading(1) }
+        TextFormatButton("H2", f.heading == 2, ink) { body.toggleHeading(2) }
+        FormatButton(Icons.Rounded.Highlight, "Highlight", Inline.MARK in f.styles, ink) { body.toggle(Inline.MARK) }
+        FormatButton(Icons.Rounded.Code, "Code", Inline.CODE in f.styles, ink) { body.toggle(Inline.CODE) }
+        FormatButton(Icons.Rounded.FormatClear, "Clear formatting", false, ink) { body.clearFormatting() }
     }
 }
 

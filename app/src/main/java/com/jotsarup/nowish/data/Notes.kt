@@ -72,11 +72,4 @@ data class ChecklistItem(val id: String = newUid(), val text: String = "", val d
 
 fun imagesJson(uids: List<String>): String = JSONArray(uids).toString()
 
-/** Good-enough HTML → text for card previews and search. */
-fun htmlToText(html: String): String = html
-    .replace(Regex("(?i)<br\\s*/?>|</p>|</li>|</h[1-6]>|</div>"), "\n")
-    .replace(Regex("<[^>]+>"), "")
-    .replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-    .replace("&quot;", "\"").replace("&#39;", "'")
-    .replace(Regex("\n{3,}"), "\n\n")
-    .trim()
+fun htmlToText(html: String): String = NoteDoc.parse(html).plainText.replace(Regex("\n{3,}"), "\n\n")
