@@ -213,7 +213,15 @@ private class HtmlReader(private val html: String) {
         when (name) {
             "p", "div", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6" -> {
                 popFrame(name)
-                endBlock()
+                if (itemType != null) {
+                    // A paragraph inside <li> is that item, so </li> mustn't add a blank one after it.
+                    if (runs.isNotEmpty()) {
+                        flush(force = false)
+                        blockHadBreak = true
+                    }
+                } else {
+                    endBlock()
+                }
                 return
             }
             "li" -> {
