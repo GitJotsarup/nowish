@@ -140,8 +140,11 @@ class NoteFlowTest {
         tapDesc("Numbered list")
         type("numbered one"); enter()
         type("numbered two"); enter(); enter()
-        type("a long paragraph that keeps going and going until it wraps across more than one line on the screen for sure")
-        waitForBody("for sure")
+        // Chunked: the shell's "input text" gives up partway through long strings.
+        for (part in listOf("a long paragraph that keeps ", "going and going until it ", "wraps across more than one ", "line on the screen for sure")) {
+            type(part)
+            waitForBody(part)
+        }
         shot("02-mixed-content")
         assertEquals(
             "<p>Short first line</p><p>Another</p><ul><li>bullet item</li><li>second bullet</li></ul>" +
