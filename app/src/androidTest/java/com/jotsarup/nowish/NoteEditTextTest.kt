@@ -118,6 +118,29 @@ class NoteEditTextTest {
         assertEquals("<ul><li>x</li></ul>", html)
     }
 
+    /** On-screen keyboards build each word as "composing" text, one letter at a time. */
+    @Test fun lettersStayInOrderRightAfterTappingBullet() = editor {
+        val ic = box.onCreateInputConnection(EditorInfo())!!
+        repeat(25) {
+            box.setText("")
+            box.toggleList(BlockType.BULLET)
+            val word = "milk"
+            for (end in 1..word.length) ic.setComposingText(word.substring(0, end), 1)
+            ic.finishComposingText()
+            assertEquals("•  milk", text)
+            assertEquals(box.length(), box.selectionStart)
+        }
+    }
+
+    @Test fun composingAcrossABoldWordKeepsItBold() = editor("<p><b>bold</b></p>") {
+        val ic = box.onCreateInputConnection(EditorInfo())!!
+        box.setSelection(0, 4)
+        ic.setComposingRegion(0, 4)
+        ic.setComposingText("bolder", 1)
+        ic.finishComposingText()
+        assertEquals("<p><b>bolder</b></p>", html)
+    }
+
     @Test fun typingDashStartsAList() = editor {
         type("- ")
         assertEquals("•  ", text)

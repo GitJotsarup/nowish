@@ -124,7 +124,12 @@ class NoteFlowTest {
         val bounds: Rect = box.visibleBounds
         device.click(bounds.centerX(), bounds.top + 20)
         device.waitForIdle()
-        Thread.sleep(500)
+        // Injected keys arrive in milliseconds; while the keyboard is still attaching they can overtake each other.
+        repeat(50) {
+            if (shell("dumpsys input_method").contains("mInputShown=true")) return@repeat
+            Thread.sleep(200)
+        }
+        Thread.sleep(1_000)
     }
 
     @Test fun titleThenBodyTypesIntoTheBody() {
