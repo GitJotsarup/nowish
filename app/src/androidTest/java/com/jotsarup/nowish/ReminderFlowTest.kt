@@ -39,6 +39,16 @@ class ReminderFlowTest {
         Thread.sleep(400)
         shell("screencap -p /data/local/tmp/shots/$name.png")
     }
+    private fun failWithScreen(message: String): Nothing {
+        val tag = "FAIL-" + message.replace(Regex("[^A-Za-z0-9]+"), "_").take(40)
+        shell("screencap -p /data/local/tmp/shots/$tag.png")
+        shell("uiautomator dump /data/local/tmp/shots/$tag.xml")
+        throw AssertionError("$message
+REPORT:
+$report")
+    }
+    private fun check(ok: Boolean, what: String) { if (!ok) failWithScreen(what) }
+
     private fun pause(ms: Long = 400) { device.waitForIdle(); Thread.sleep(ms) }
     private fun clickDesc(desc: String): Boolean {
         val node = device.wait(Until.findObject(By.desc(desc)), 4_000) ?: return false
@@ -109,21 +119,21 @@ class ReminderFlowTest {
             context.getSystemService(android.app.AlarmManager::class.java).canScheduleExactAlarms()}")
 
         // 1) Add box: "Pick date" (today) then "Remind me".
-        assertTrue(clickDesc("Add task"))
+        check(clickDesc("Add task"), "step: clickDesc(Add task)")
         type("Date then time")
-        assertTrue("date chip", clickText("Pick date"))
+        check(clickText("Pick date"), "date chip")
         shot("a-date-dialog")
-        assertTrue("date Set", clickText("Set"))
-        assertTrue("time chip", clickText("Remind me"))
-        assertTrue("time Set", pickTime(target.toLocalTime(), "a"))
+        check(clickText("Set"), "date Set")
+        check(clickText("Remind me"), "time chip")
+        check(pickTime(target.toLocalTime(), "a"), "time Set")
         shot("a-sheet-before-add")
-        assertTrue("add", clickDesc("Add"))
+        check(clickDesc("Add"), "add")
         pause(800)
 
         // 2) Add box: "Remind me" first, then "Pick date".
         type("Time then date")
-        assertTrue(clickText("Remind me"))
-        assertTrue(pickTime(target.toLocalTime(), "b"))
+        check(clickText("Remind me"), "step: clickText(Remind me)")
+        check(pickTime(target.toLocalTime(), "b"), "step: pickTime(target.toLocalTime(), b)")
         clickText("Pick date")
         clickText("Set")
         shot("b-sheet-before-add")
@@ -132,27 +142,27 @@ class ReminderFlowTest {
         closeSheet()
 
         // 3) Long-press menu on an existing task.
-        assertTrue(clickDesc("Add task"))
+        check(clickDesc("Add task"), "step: clickDesc(Add task)")
         type("Menu reminder")
         clickDesc("Add")
         pause(800)
         closeSheet()
         shot("c-list")
         val row = device.wait(Until.findObject(By.text("Menu reminder")), 4_000)
-        assertTrue("row", row != null)
+        check(row != null, "row")
         row.longClick()
         pause(800)
         shot("c-options")
         clickText("Pick date")
         clickText("Set")
-        assertTrue("reminder chip", clickText("Add a reminder"))
-        assertTrue(pickTime(target.toLocalTime(), "c"))
+        check(clickText("Add a reminder"), "reminder chip")
+        check(pickTime(target.toLocalTime(), "c"), "step: pickTime(target.toLocalTime(), c)")
         shot("c-options-after")
         device.pressBack()
         pause(800)
 
         // 4) A future date (tomorrow) should register an alarm for tomorrow.
-        assertTrue(clickDesc("Add task"))
+        check(clickDesc("Add task"), "step: clickDesc(Add task)")
         type("Tomorrow reminder")
         clickText("Tomorrow")
         clickText("Remind me")
@@ -189,6 +199,6 @@ class ReminderFlowTest {
         val tomorrowOk = task("Tomorrow reminder")?.dueDate == today.plusDays(1)
         val allShown = shown.all { it.second }
         println("REMINDER REPORT\n$report")
-        assertTrue("REPORT:\n$report", expectedToday && tomorrowOk && allShown)
+        check(expectedToday && tomorrowOk && allShown, "REPORT:\n$report")
     }
 }

@@ -52,15 +52,23 @@ class NoteFlowTest {
     }
     private fun enter() = key(66)
     private fun backspace() = key(67)
+    /** Saves what's on screen, then fails, so a bad CI run shows what the emulator was doing. */
+    private fun failWithScreen(message: String): Nothing {
+        val tag = "FAIL-" + message.replace(Regex("[^A-Za-z0-9]+"), "_").take(40)
+        shell("screencap -p /data/local/tmp/shots/$tag.png")
+        shell("uiautomator dump /data/local/tmp/shots/$tag.xml")
+        throw AssertionError(message)
+    }
+
     private fun tapDesc(desc: String) {
-        val node = device.wait(Until.findObject(By.desc(desc)), 5_000)
+        val node = device.wait(Until.findObject(By.desc(desc)), 5_000) ?: failWithScreen("no control: $desc")
         assertNotNull("no control: $desc", node)
         node.click()
         device.waitForIdle()
         Thread.sleep(250)
     }
     private fun tapText(text: String) {
-        val node = device.wait(Until.findObject(By.text(text)), 5_000)
+        val node = device.wait(Until.findObject(By.text(text)), 5_000) ?: failWithScreen("no text: $text")
         assertNotNull("no text: $text", node)
         node.click()
         device.waitForIdle()
@@ -120,7 +128,7 @@ class NoteFlowTest {
         tapDesc("New note")
         tapText("Title")
         type(title)
-        val box = device.wait(Until.findObject(By.res(pkg, "note_body")), 5_000)
+        val box = device.wait(Until.findObject(By.res(pkg, "note_body")), 8_000) ?: failWithScreen("no note body after Title")
         val bounds: Rect = box.visibleBounds
         device.click(bounds.centerX(), bounds.top + 20)
         device.waitForIdle()

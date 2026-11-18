@@ -163,7 +163,12 @@ fun AddTaskSheet(
     LaunchedEffect(Unit) { focus.requestFocus() }
 
     if (pickDate) {
-        DatePickDialog(date ?: today, onDismiss = { pickDate = false }) { date = it; sticky = false; pickDate = false }
+        DatePickDialog(date ?: today, onDismiss = { pickDate = false }) {
+            date = it
+            // Picking today or tomorrow on the calendar is the same as tapping that chip.
+            sticky = it == today || it == today.plusDays(1)
+            pickDate = false
+        }
     }
     if (pickTime) {
         TimePickDialog(time ?: nextHour, onDismiss = { pickTime = false }) {
@@ -306,7 +311,7 @@ fun TaskOptionsSheet(
 
     if (pickDate) {
         DatePickDialog(current.dueDate ?: today, onDismiss = { pickDate = false }) {
-            apply(current.copy(dueDate = it, sticky = false))
+            apply(current.copy(dueDate = it, sticky = it == today || it == today.plusDays(1)))
             pickDate = false
         }
     }
