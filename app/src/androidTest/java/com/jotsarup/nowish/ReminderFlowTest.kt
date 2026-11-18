@@ -50,6 +50,15 @@ class ReminderFlowTest {
     }
     private fun type(text: String) { shell("input text " + text.replace(" ", "%s")); pause(600) }
 
+    /** Closes the add panel (keyboard first, then the panel) until the + button is reachable. */
+    private fun closeSheet() {
+        repeat(4) {
+            if (!device.hasObject(By.desc("Add")) && device.hasObject(By.desc("Add task"))) return
+            device.pressBack()
+            pause(600)
+        }
+    }
+
     private fun tasks(): List<Task> = runBlocking { context.nowish.database.dao().openTasks() }
     private fun task(title: String) = tasks().firstOrNull { it.title == title }
 
@@ -120,16 +129,15 @@ class ReminderFlowTest {
         shot("b-sheet-before-add")
         clickDesc("Add")
         pause(800)
-        device.pressBack()
-        pause()
+        closeSheet()
 
         // 3) Long-press menu on an existing task.
         assertTrue(clickDesc("Add task"))
         type("Menu reminder")
         clickDesc("Add")
         pause(800)
-        device.pressBack()
-        pause()
+        closeSheet()
+        shot("c-list")
         val row = device.wait(Until.findObject(By.text("Menu reminder")), 4_000)
         assertTrue("row", row != null)
         row.longClick()
@@ -151,8 +159,7 @@ class ReminderFlowTest {
         pickTime(target.toLocalTime(), "d")
         clickDesc("Add")
         pause(800)
-        device.pressBack()
-        pause()
+        closeSheet()
 
         for (title in listOf("Date then time", "Time then date", "Menu reminder", "Tomorrow reminder")) {
             val t = task(title)
