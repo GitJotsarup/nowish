@@ -103,6 +103,11 @@ class NoteFlowTest {
     private fun lineCount() = onBox { it.layout.lineCount }
 
     @Before fun start() {
+        // CI emulators' launcher sometimes freezes; tap "Wait" whenever its popup shows up.
+        device.registerWatcher("system-not-responding") {
+            val wait = device.findObject(androidx.test.uiautomator.UiSelector().text("Wait"))
+            wait.exists() && wait.click()
+        }
         shell("mkdir -p /data/local/tmp/shots")
         shell("pm grant $pkg android.permission.POST_NOTIFICATIONS")
         scenario = ActivityScenario.launch(MainActivity::class.java)
@@ -120,6 +125,7 @@ class NoteFlowTest {
     }
 
     @After fun stop() {
+        device.removeWatcher("system-not-responding")
         shell("cmd uimode night no")
         scenario.close()
     }

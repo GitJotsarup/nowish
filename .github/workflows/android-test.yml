@@ -43,6 +43,8 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: |
+            adb shell settings put global hide_error_dialogs 1
+            adb shell settings put global window_animation_scale 0
             gradle connectedDebugAndroidTest --no-daemon --continue || echo "TESTS_FAILED=1" >> "$GITHUB_ENV"
             mkdir -p shots && adb pull /data/local/tmp/shots/. shots/ || true
 
