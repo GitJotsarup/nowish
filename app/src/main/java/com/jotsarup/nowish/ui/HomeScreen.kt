@@ -1,5 +1,10 @@
 package com.jotsarup.nowish.ui
 
+import androidx.compose.material3.Surface
+import androidx.compose.material.icons.rounded.NotificationsOff
+import com.jotsarup.nowish.reminders.ReminderProblem
+import com.jotsarup.nowish.reminders.ReminderHealth
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -412,6 +417,14 @@ private fun TaskListContent(
     onOverdueToToday: (List<Task>) -> Unit = {},
 ) {
     val listsById = remember(state.lists) { state.lists.associateBy { it.id } }
+    val context = LocalContext.current
+    // Re-checked every time you come back (e.g. from the settings screen the banner opens).
+    var reminderProblem by remember { mutableStateOf<ReminderProblem?>(null) }
+    LifecycleResumeEffect(Unit) {
+        reminderProblem = ReminderHealth.problem(context)
+        onPauseOrDispose { }
+    }
+    val hasReminders = state.sections.any { s -> s.tasks.any { it.reminderTime != null } }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
@@ -421,6 +434,12 @@ private fun TaskListContent(
             bottom = padding.calculateBottomPadding() + 104.dp,
         ),
     ) {
+        val problem = reminderProblem
+        if (problem != null && hasReminders) {
+            item(key = "reminder-warning") {
+                ReminderWarning(problem) { context.startActivity(ReminderHealth.fixIntent(context, problem)) }
+            }
+        }
         if (state.loaded && state.sections.isEmpty()) {
             item(key = "empty") { EmptyState(inList = state.list != null, Modifier.animateItem()) }
         }
@@ -670,6 +689,23 @@ private fun DrawerContent(
                 Text("Success sound", style = MaterialTheme.typography.labelLarge)
             }
             Switch(checked = soundOn, onCheckedChange = onSound)
+        }
+    }
+}
+
+@Composable
+private fun ReminderWarning(problem: ReminderProblem, onFix: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+    ) {
+        Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.NotificationsOff, null)
+            Spacer(Modifier.width(12.dp))
+            Text(problem.message, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = onFix) { Text("Fix") }
         }
     }
 }
