@@ -43,9 +43,7 @@ class ReminderFlowTest {
         val tag = "FAIL-" + message.replace(Regex("[^A-Za-z0-9]+"), "_").take(40)
         shell("screencap -p /data/local/tmp/shots/$tag.png")
         shell("uiautomator dump /data/local/tmp/shots/$tag.xml")
-        throw AssertionError("$message
-REPORT:
-$report")
+        throw AssertionError(message + "\nREPORT:\n" + report)
     }
     private fun check(ok: Boolean, what: String) { if (!ok) failWithScreen(what) }
 
